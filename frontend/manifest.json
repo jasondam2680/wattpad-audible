@@ -1,0 +1,45 @@
+{
+  "name": "Wattpad AI Audiobook",
+  "short_name": "WattpadAudio",
+  "description": "Chuyển truyện Wattpad thành sách nói chuyên nghiệp với giọng đọc và biểu cảm AI",
+  "lang": "vi",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#060913",
+  "theme_color": "#060913",
+  "categories": ["books", "entertainment", "music", "utilities"],
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Phòng thu AI Voice",
+      "short_name": "Phòng thu",
+      "description": "Tùy chỉnh giọng đọc 48kHz và nghe thử",
+      "url": "/#voices",
+      "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Tủ sách & Sách nói",
+      "short_name": "Tủ sách",
+      "description": "Xem thư viện truyện và lịch sử nghe",
+      "url": "/#library",
+      "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Wattpad AI Audiobook - Desktop Studio</title>
+  
+  <!-- PWA & Mobile Meta Tags -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#f8f9fc">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="WattpadAudio">
+  <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
+
+  <!-- Lucide Icons & Tailwind CSS (for utility resets) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Custom Design DNA Stylesheet -->
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+  <!-- AMBIENT ATMOSPHERE BACKGROUND BLOOMS -->
+  <div class="ambient-canvas-wrapper" aria-hidden="true">
+    <div class="ambient-bloom bloom-peach"></div>
+    <div class="ambient-bloom bloom-sky"></div>
+    <div class="ambient-bloom bloom-lavender"></div>
+  </div>
+
+  <!-- DESKTOP WINDOW CONTAINER (macOS Shell) -->
+  <div class="desktop-window-container">
+    <div class="macos-window-frame">
+
+      <!-- APP LAYOUT: FLOATING SIDEBAR + MAIN CONTENT CANVAS -->
+      <div class="desktop-app-layout">
+
+        <!-- FLOATING TRANSLUCENT SIDEBAR -->
+        <aside class="floating-sidebar" id="app-sidebar">
+          
+          <!-- Traffic Lights Window Controls -->
+          <div class="macos-traffic-lights" aria-label="macOS Window Controls">
+            <span class="traffic-light traffic-close" title="Đóng"></span>
+            <span class="traffic-light traffic-min" title="Thu nhỏ"></span>
+            <span class="traffic-light traffic-max" title="Phóng to"></span>
+          </div>
+
+          <!-- Sidebar Brand Header -->
+          <div class="sidebar-header">
+            <div class="sidebar-brand-row">
+              <div class="sidebar-logo-icon">
+                <i data-lucide="headphones" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <div class="sidebar-brand-title">Wattpad AI</div>
+                <div class="sidebar-brand-subtitle">Desktop Studio</div>
+              </div>
+            </div>
+
+            <!-- Spotlight Search Pill -->
+            <div class="sidebar-search-box">
+              <i data-lucide="search" class="w-3.5 h-3.5 search-icon"></i>
+              <input type="text" id="sidebar-quick-search" placeholder="Tìm kiếm nhanh..." aria-label="Quick search">
+            </div>
+          </div>
+
+          <!-- Sidebar Navigation Items -->
+          <div class="sidebar-nav-container">
+            
+            <!-- Section 1: Khám phá / Main Navigation -->
+            <div class="nav-group-title">Khám phá</div>
+            <ul class="nav-items-list">
+              <li>
+                <button type="button" class="nav-item-btn active" id="nav-btn-home">
+                  <i data-lucide="home"></i>
+                  <span>Trang chủ</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" class="nav-item-btn" id="nav-btn-voices">
+                  <i data-lucide="mic"></i>
+                  <span>Phòng thu</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" class="nav-item-btn" id="btn-open-favorites" title="Xem danh sách truyện & chương yêu thích">
+                  <i data-lucide="bookmark"></i>
+                  <span class="flex-1">Tủ sách</span>
+                  <span id="badge-fav-count" class="hidden px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white leading-none">0</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" class="nav-item-btn" id="btn-demo-story" title="Nghe thử truyện mẫu">
+                  <i data-lucide="sparkles"></i>
+                  <span>Truyện mẫu</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" class="nav-item-btn" id="btn-open-custom-modal" title="Nhập truyện thủ công">
+                  <i data-lucide="file-plus"></i>
+                  <span>Nhập chữ</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" class="nav-item-btn hidden" id="btn-install-pwa">
+                  <i data-lucide="download"></i>
+                  <span>Cài App PWA</span>
+                </button>
+              </li>
+            </ul>
+
+            <!-- Section 2: Tủ sách & Ghim (Library) -->
+            <div class="nav-group-title">Tủ sách</div>
+            <div class="space-y-1">
+              <div class="pinned-item-row" id="sidebar-pinned-story" title="Truyện đang xem">
+                <div class="pinned-thumbnail flex items-center justify-center text-white text-[10px]">
+                  <i data-lucide="book" class="w-3 h-3"></i>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="font-medium truncate" id="sidebar-pinned-title">Hoàng Tử Bé</div>
+                  <div class="text-[10px] text-slate-400 truncate" id="sidebar-pinned-sub">Chương đang phát</div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Sidebar Footer / Profile Capsule -->
+          <div class="sidebar-footer">
+            <div class="profile-capsule cursor-pointer hover:bg-slate-100 transition" id="profile-capsule-btn" title="Tài khoản thành viên">
+              <div class="profile-avatar bg-gradient-to-tr from-indigo-500 to-purple-600 text-white font-bold text-xs" id="sidebar-user-avatar">J</div>
+              <div class="min-w-0 flex-1">
+                <div class="profile-name truncate" id="sidebar-user-name">Jason</div>
+                <div class="profile-sub truncate" id="sidebar-user-role">Thành viên chính thức</div>
+              </div>
+            </div>
+            <button id="btn-sidebar-auth-action" class="text-slate-400 hover:text-indigo-600 p-1.5 rounded-lg hover:bg-slate-100 transition" title="Đăng nhập / Đăng xuất">
+              <i data-lucide="log-out" id="icon-sidebar-auth" class="w-4 h-4"></i>
+            </button>
+          </div>
+
+        </aside>
+
+        <!-- MAIN WORKSPACE CONTENT CANVAS -->
+        <main class="main-workspace-canvas" id="main-content-canvas">
+
+          <!-- ANDROID TOP BAR (Chỉ hiển thị trên phiên bản Android / Mobile) -->
+          <div class="android-top-bar" id="android-top-bar">
+            <div class="flex items-center space-x-2.5 min-w-0">
+              <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-rose-500 to-rose-600 flex items-center justify-center text-white shadow-sm shrink-0">
+                <i data-lucide="headphones" class="w-4 h-4"></i>
+              </div>
+              <div class="min-w-0">
+                <h2 class="font-bold text-sm text-slate-900 leading-tight truncate">Wattpad AI Audiobook</h2>
+                <p class="text-[10px] text-slate-500 truncate" id="android-user-status-text">Thành viên: Jason</p>
+              </div>
+            </div>
+            <div class="flex items-center space-x-1.5 shrink-0">
+              <button type="button" id="btn-android-settings" class="hidden p-2 rounded-xl btn-secondary-desktop text-slate-600 hover:text-slate-900" title="Cài đặt máy chủ (Server IP)">
+                <i data-lucide="settings" class="w-4 h-4"></i>
+              </button>
+              <button type="button" id="btn-android-user-modal" class="p-2 rounded-xl btn-secondary-desktop text-slate-600 hover:text-slate-900" title="Tài khoản">
+                <i data-lucide="user" class="w-4 h-4"></i>
+              </button>
+              <button type="button" id="btn-android-search" class="p-2 rounded-xl btn-secondary-desktop text-slate-600 hover:text-slate-900" title="Tìm kiếm">
+                <i data-lucide="search" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+
+
+
+          <!-- Page Header -->
+          <div class="page-hero-header">
+            <h1 class="page-title" id="page-hero-title">Khám phá</h1>
+            <p class="page-subtitle">Thưởng thức sách nói với công nghệ giọng đọc trí tuệ nhân tạo 48kHz Studio Quality</p>
+          </div>
+
+          <!-- SECTION: RECENTLY PLAYED & READ (Đã nghe gần đây) -->
+          <section id="section-recently-played" class="space-y-3">
+            <div class="section-header-row">
+              <div class="section-title flex items-center gap-2">
+                <span>Đã nghe gần đây</span>
+                <i data-lucide="history" class="w-4 h-4 text-slate-400"></i>
+              </div>
+              <span class="section-link-more cursor-pointer" id="btn-view-all-history">
+                Xem tất cả <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+              </span>
+            </div>
+
+            <div id="recent-played-scroll" class="recent-carousel-grid">
+              <!-- Được cập nhật tự động từ lịch sử nghe và đọc của người dùng -->
+            </div>
+          </section>
+
+          <!-- SPOTLIGHT URL FETCH BAR (Chuyển xuống dưới hàng Thẻ album) -->
+          <section class="spotlight-bar-card" id="section-fetch-bar">
+            <form id="form-fetch-story" class="flex items-center gap-3 w-full">
+              <i data-lucide="link" class="w-4 h-4 text-slate-400 shrink-0"></i>
+              <input 
+                type="text" 
+                id="input-story-url" 
+                class="spotlight-input"
+                placeholder="Dán đường link truyện Wattpad (ví dụ: https://www.wattpad.com/story/...)" 
+                required
+              >
+              <button type="button" id="btn-clear-input" class="hidden text-slate-400 hover:text-slate-600 p-1" title="Xóa link">
+                <i data-lucide="x" class="w-4 h-4"></i>
+              </button>
+              <button type="submit" id="btn-submit-fetch" class="btn-primary-desktop shrink-0">
+                <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                <span>Tải truyện</span>
+              </button>
+            </form>
+          </section>
+
+          <!-- EMPTY STATE KHI CHƯA CHỌN TRUYỆN -->
+          <section id="empty-state" class="glass-panel-card p-10 text-center space-y-4">
+            <div class="w-16 h-16 mx-auto rounded-2xl bg-rose-50 border border-rose-200/60 flex items-center justify-center text-rose-500 shadow-sm">
+              <i data-lucide="book-open" class="w-8 h-8"></i>
+            </div>
+            <div class="max-w-md mx-auto space-y-1">
+              <h3 class="font-bold text-lg text-slate-900">Bắt đầu trải nghiệm Sách nói AI</h3>
+              <p class="text-xs text-slate-500">Dán link truyện Wattpad ở trên hoặc bấm nút "Thử ngay truyện mẫu" để tải danh sách chương và nghe thử.</p>
+            </div>
+            <div class="pt-2">
+              <button id="btn-empty-demo" class="btn-primary-desktop">
+                <i data-lucide="play-circle" class="w-4 h-4"></i>
+                <span>Thử ngay truyện mẫu</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- STORY CONTENT & CHAPTER WORKSPACE (Hiển thị khi đã tải truyện) -->
+          <div id="story-content-section" class="hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+            <!-- CỘT TRÁI: THÔNG TIN TRUYỆN & PHÒNG THU GIỌNG ĐỌC (5/12) -->
+            <div class="lg:col-span-5 space-y-6">
+
+              <!-- THẺ THÔNG TIN TRUYỆN -->
+              <div class="glass-panel-card space-y-4">
+                <div class="story-header-flex">
+                  <img 
+                    id="story-cover" 
+                    src="" 
+                    alt="Bìa truyện" 
+                    class="story-cover-desktop"
+                    onerror="this.src='https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&q=80'"
+                  >
+                  <div class="flex-1 min-w-0 flex flex-col justify-between py-0.5">
+                    <div>
+                      <span class="inline-block px-2.5 py-0.5 rounded-full text-[10.5px] font-semibold bg-rose-100/70 text-rose-700 border border-rose-200/80 mb-1.5">Tác phẩm Wattpad</span>
+                      <h2 id="story-title" class="font-bold text-base sm:text-lg text-slate-900 line-clamp-2 leading-snug">Tên truyện</h2>
+                      <p id="story-author" class="text-xs text-slate-500 mt-1 flex items-center space-x-1.5">
+                        <i data-lucide="user" class="w-3.5 h-3.5 text-slate-400"></i>
+                        <span>Tác giả</span>
+                      </p>
+                      <button id="btn-toggle-fav-story" class="mt-2.5 inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl btn-secondary-desktop text-xs" title="Đánh dấu truyện yêu thích">
+                        <i data-lucide="heart" id="icon-fav-story" class="w-3.5 h-3.5 text-slate-400"></i>
+                        <span id="label-fav-story" class="text-[11px] font-medium">Yêu thích truyện</span>
+                      </button>
+                    </div>
+                    <div class="flex items-center space-x-4 text-xs text-slate-600 pt-2 border-t border-slate-200/60">
+                      <span id="story-chapter-count" class="flex items-center space-x-1 font-medium">
+                        <i data-lucide="list" class="w-3.5 h-3.5 text-slate-400"></i>
+                        <span>0 chương</span>
+                      </span>
+                      <span id="story-converted-count" class="flex items-center space-x-1 text-emerald-600 font-semibold">
+                        <i data-lucide="check-circle" class="w-3.5 h-3.5"></i>
+                        <span>0 đã chuyển</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <p id="story-description" class="text-xs text-slate-600 line-clamp-3 leading-relaxed border-t border-slate-200/60 pt-3">
+                  Mô tả tóm tắt nội dung...
+                </p>
+              </div>
+
+              <!-- PHÒNG THU GIỌNG ĐỌC & BIỂU CẢM AI (Voice Studio) -->
+              <div class="glass-panel-card space-y-4" id="voice-studio-panel">
+                <div class="flex items-center justify-between border-b border-slate-200/60 pb-3">
+                  <div class="flex items-center space-x-2">
+                    <div class="w-6 h-6 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center">
+                      <i data-lucide="sliders" class="w-3.5 h-3.5"></i>
+                    </div>
+                    <h3 class="font-bold text-sm text-slate-900">Phòng thu Giọng đọc AI</h3>
+                  </div>
+                  <span id="badge-engine-tag" class="text-[10.5px] px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 font-medium">48kHz AI Neural</span>
+                </div>
+
+                <!-- Chọn Động cơ TTS -->
+                <div class="space-y-1.5">
+                  <label class="text-xs font-semibold text-slate-700 flex items-center space-x-1">
+                    <i data-lucide="cpu" class="w-3.5 h-3.5 text-slate-400"></i>
+                    <span>Động cơ AI Voice:</span>
+                  </label>
+                  <div class="engine-toggle-pill">
+                    <button type="button" id="btn-engine-vieneu" class="engine-toggle-btn active">
+                      <span>🦜 VieNeu-TTS</span>
+                      <span class="text-[9.5px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-mono">48kHz</span>
+                    </button>
+                    <button type="button" id="btn-engine-edge" class="engine-toggle-btn">
+                      <span>Edge Neural</span>
+                      <span class="text-[9.5px] px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-600 font-mono">24kHz</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Chọn Người đọc -->
+                <div class="space-y-1.5">
+                  <div class="flex items-center justify-between text-xs font-semibold text-slate-700">
+                    <span class="flex items-center space-x-1">
+                      <i data-lucide="mic" class="w-3.5 h-3.5 text-slate-400"></i>
+                      <span>Người đọc AI:</span>
+                    </span>
+                    <span id="label-voice-details" class="text-[11px] text-slate-400 font-normal">23 giọng đọc</span>
+                  </div>
+                  <select id="select-voice" class="form-select-native">
+                    <!-- Populated dynamically via JS -->
+                  </select>
+                </div>
+
+                <!-- VieNeu Cues Section -->
+                <div id="section-vieneu-cues" class="space-y-2">
+                  <div class="flex items-center justify-between text-xs font-semibold text-slate-700">
+                    <span class="flex items-center space-x-1">
+                      <i data-lucide="sparkles" class="w-3.5 h-3.5 text-rose-500"></i>
+                      <span>Thẻ biểu cảm ngữ điệu:</span>
+                    </span>
+                    <span id="current-cue-label" class="text-[11px] text-rose-600 font-medium">Tự nhiên</span>
+                  </div>
+                  <div class="grid grid-cols-2 gap-2" id="vieneu-cues-grid">
+                    <!-- VieNeu cues populated dynamically -->
+                  </div>
+                </div>
+
+                <!-- Edge-TTS Controls Section -->
+                <div id="section-edge-controls" class="hidden space-y-4">
+                  <div class="space-y-2">
+                    <div class="flex items-center justify-between text-xs font-semibold text-slate-700">
+                      <span class="flex items-center space-x-1">
+                        <i data-lucide="smile" class="w-3.5 h-3.5 text-rose-500"></i>
+                        <span>Biểu cảm / Cảm xúc:</span>
+                      </span>
+                      <span id="current-emotion-label" class="text-[11px] text-rose-600 font-medium">Bình thản</span>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2" id="emotion-presets-grid">
+                      <!-- Emotion buttons populated dynamically via JS -->
+                    </div>
+                  </div>
+
+                  <!-- Tone giọng Pitch -->
+                  <div class="space-y-1.5">
+                    <div class="flex justify-between items-center text-xs">
+                      <span class="font-medium text-slate-700">Tone giọng (Pitch):</span>
+                      <span id="pitch-value-badge" class="font-mono text-rose-600 font-bold">+0Hz</span>
+                    </div>
+                    <input type="range" id="slider-pitch" min="-20" max="20" step="2" value="0">
+                    <div class="flex justify-between text-[10px] text-slate-400">
+                      <span>Trầm ấm (-20Hz)</span>
+                      <span>Tiêu chuẩn (0Hz)</span>
+                      <span>Trong trẻo (+20Hz)</span>
+                    </div>
+                  </div>
+
+                  <!-- Tốc độ đọc Speed -->
+                  <div class="space-y-1.5">
+                    <div class="flex justify-between items-center text-xs">
+                      <span class="font-medium text-slate-700">Tốc độ đọc (Speed):</span>
+                      <span id="rate-value-badge" class="font-mono text-rose-600 font-bold">1.0x</span>
+                    </div>
+                    <input type="range" id="slider-rate" min="-30" max="40" step="5" value="0">
+                    <div class="flex justify-between text-[10px] text-slate-400">
+                      <span>Chậm (0.7x)</span>
+                      <span>Chuẩn (1.0x)</span>
+                      <span>Nhanh (1.4x)</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Nút Nghe thử câu mẫu -->
+                <div class="pt-1">
+                  <button id="btn-preview-sample" class="w-full btn-secondary-desktop py-2.5">
+                    <i data-lucide="volume-2" class="w-4 h-4 text-slate-600"></i>
+                    <span id="preview-sample-text">Nghe thử giọng đọc đã chọn</span>
+                  </button>
+                  <audio id="sample-audio-player" class="hidden"></audio>
+                </div>
+
+              </div>
+
+            </div>
+
+            <!-- CỘT PHẢI: BỘ CHỌN CHƯƠNG & CHUYỂN ĐỔI (7/12) -->
+            <div class="lg:col-span-7 space-y-4">
+              <div class="glass-panel-card flex flex-col h-full max-h-[860px]">
+                
+                <!-- Thanh điều khiển chọn chương -->
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200/60">
+                  <div>
+                    <h3 class="font-bold text-base text-slate-900 flex items-center space-x-2">
+                      <i data-lucide="layers" class="w-4 h-4 text-rose-500"></i>
+                      <span>Danh sách chương</span>
+                    </h3>
+                    <!-- Bộ lọc chương -->
+                    <div class="flex items-center space-x-1.5 mt-2" id="chapter-filters-group">
+                      <button type="button" class="chapter-filter-btn active" data-filter="all">Tất cả (<span id="filter-count-all">0</span>)</button>
+                      <button type="button" class="chapter-filter-btn" data-filter="favorites">⭐ Yêu thích (<span id="filter-count-fav">0</span>)</button>
+                      <button type="button" class="chapter-filter-btn" data-filter="unconverted">Chưa chuyển (<span id="filter-count-unconv">0</span>)</button>
+                    </div>
+                  </div>
+
+                  <div class="flex items-center space-x-2">
+                    <label class="flex items-center space-x-2 text-xs text-slate-600 cursor-pointer px-3 py-1.5 rounded-xl border border-slate-200/80 bg-white/70 hover:bg-white transition">
+                      <input type="checkbox" id="checkbox-select-all" class="w-3.5 h-3.5 rounded text-rose-600 focus:ring-rose-500 cursor-pointer">
+                      <span class="font-medium">Chọn tất cả</span>
+                    </label>
+                    
+                    <!-- Nút tải toàn bộ ZIP -->
+                    <button id="btn-download-all-zip" class="hidden items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold hover:bg-emerald-100 transition">
+                      <i data-lucide="archive" class="w-3.5 h-3.5"></i>
+                      <span>Tải ZIP</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- KHU VỰC HỢP NHẤT: BẮT ĐẦU & THEO DÕI TIẾN TRÌNH CHUYỂN ĐỔI -->
+                <div id="conversion-control-wrapper" class="py-2.5">
+                  <!-- Trạng thái Chờ / Sẵn sàng: Nút bắt đầu chuyển đổi -->
+                  <button 
+                    id="btn-start-convert" 
+                    class="w-full py-3.5 px-4 btn-primary-desktop text-sm font-bold flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-all"
+                  >
+                    <i data-lucide="sparkles" class="w-4 h-4 text-amber-200"></i>
+                    <span id="convert-btn-label">Chuyển đổi 0 chương đã chọn thành Sách nói</span>
+                  </button>
+
+                  <!-- Trạng thái Đang chuyển đổi: Hộp theo dõi tiến trình & điều khiển -->
+                  <div id="conversion-progress-banner" class="hidden glass-panel-card border-rose-200/90 bg-rose-50/70 p-3 sm:p-3.5 rounded-2xl shadow-sm space-y-2.5 transition-all">
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="flex items-center space-x-2 min-w-0">
+                        <div id="task-pulse-dot" class="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping shrink-0"></div>
+                        <span class="font-semibold text-xs sm:text-sm text-slate-800 truncate" id="task-status-text">Đang tạo sách nói AI...</span>
+                      </div>
+                      
+                      <div class="flex items-center space-x-1.5 shrink-0">
+                        <span class="text-xs font-mono font-bold text-rose-600 px-2 py-0.5 rounded-lg bg-rose-100/90 border border-rose-200/80" id="task-overall-progress">0%</span>
+                        
+                        <!-- Nút Tạm dừng / Tiếp tục -->
+                        <button id="btn-pause-resume-task" type="button" class="btn-secondary-desktop text-xs py-1 px-2.5 flex items-center space-x-1" title="Tạm dừng / Tiếp tục">
+                          <i data-lucide="pause" id="icon-task-pause" class="w-3.5 h-3.5 fill-current text-slate-600"></i>
+                          <i data-lucide="play" id="icon-task-resume" class="hidden w-3.5 h-3.5 fill-current text-emerald-600"></i>
+                          <span id="label-task-pause-resume">Tạm dừng</span>
+                        </button>
+
+                        <!-- Nút Hủy bỏ -->
+                        <button id="btn-cancel-task" type="button" class="btn-secondary-desktop text-xs py-1 px-2.5 text-rose-600 hover:text-rose-700 hover:bg-rose-100/60" title="Hủy tác vụ">
+                          <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                          <span>Hủy</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- Thanh tiến trình chuyển đổi -->
+                    <div class="w-full bg-slate-200/80 rounded-full h-2 overflow-hidden">
+                      <div id="task-progress-bar" class="liquid-progress-bar h-full rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+
+                    <div class="flex items-center justify-between text-[11px] text-slate-500 font-mono">
+                      <span id="task-chapter-detail" class="truncate pr-2">Đang chuẩn bị dữ liệu...</span>
+                      <span class="text-slate-400 shrink-0">AI Studio</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Danh sách các chương (Scrollable) -->
+                <div class="flex-1 overflow-y-auto pr-1 space-y-2 mt-1" id="chapter-list-container">
+                  <!-- Chapter items dynamically inserted here -->
+                </div>
+
+              </div>
+            </div>
+
+          </div>
+
+        </main>
+
+      </div>
+
+    </div>
+  </div>
+
+  <!-- FLOATING CAPSULE AUDIOBOOK PLAYER (macOS Sequoia Bottom Island) -->
+  <aside id="audiobook-player" class="hidden floating-capsule-player" aria-label="Audiobook Player Controls">
+    
+    <div class="player-main-row">
+      
+      <!-- Cụm trái: Thông tin bài đang phát -->
+      <div class="player-track-cluster">
+        <div class="relative shrink-0">
+          <img id="player-mini-cover" src="" alt="" class="player-capsule-cover" onerror="this.src='https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=200&q=80'">
+          <div id="player-equalizer" class="capsule-equalizer absolute bottom-1 right-1 bg-white/90 p-0.5 rounded shadow-sm">
+            <div class="equalizer-bar"></div>
+            <div class="equalizer-bar"></div>
+            <div class="equalizer-bar"></div>
+            <div class="equalizer-bar"></div>
+          </div>
+        </div>
+        <div class="min-w-0">
+          <h4 id="player-chapter-title" class="player-meta-title">Chưa chọn chương</h4>
+          <p id="player-story-title" class="player-meta-subtitle">Tên truyện</p>
+        </div>
+      </div>
+
+      <!-- Cụm giữa: Điều khiển phát & Timeline Scrubber -->
+      <div class="player-transport-cluster">
+        
+        <div class="transport-buttons-row">
+          <!-- Lùi 15 giây -->
+          <button id="btn-player-rewind" class="transport-btn" title="Lùi 15 giây">
+            <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+          </button>
+
+          <!-- Chương trước -->
+          <button id="btn-player-prev" class="transport-btn" title="Chương trước">
+            <i data-lucide="skip-back" class="w-4 h-4"></i>
+          </button>
+
+          <!-- Nút Play / Pause tròn Rose Accent (macOS 26 Liquid Crystal) -->
+          <button id="btn-player-play-pause" class="transport-play-btn" title="Phát / Tạm dừng" aria-label="Phát / Tạm dừng">
+            <span id="player-play-icon-slot" class="flex items-center justify-center pointer-events-none">
+              <i data-lucide="play" class="w-4 h-4 fill-current ml-0.5"></i>
+            </span>
+          </button>
+
+          <!-- Chương kế -->
+          <button id="btn-player-next" class="transport-btn" title="Chương sau">
+            <i data-lucide="skip-forward" class="w-4 h-4"></i>
+          </button>
+
+          <!-- Tiến 15 giây -->
+          <button id="btn-player-forward" class="transport-btn" title="Tiến 15 giây">
+            <i data-lucide="rotate-cw" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <!-- Scrubber Timeline Bar -->
+        <div class="scrubber-timeline-row">
+          <span id="player-current-time" class="scrubber-time-text">00:00</span>
+          
+          <div class="scrubber-track-bar" id="player-progress-container">
+            <div id="player-progress-bar" class="scrubber-progress-fill" style="width: 0%"></div>
+          </div>
+
+          <span id="player-total-time" class="scrubber-time-text">00:00</span>
+        </div>
+
+      </div>
+
+      <!-- Cụm phải: Tốc độ & Utilities -->
+      <div class="player-utility-cluster">
+        <!-- Nút chỉnh tốc độ phát lại (1x, 1.25x, 1.5x) -->
+        <button id="btn-playback-rate" class="speed-rate-capsule" title="Tốc độ phát">
+          1.0x
+        </button>
+
+        <!-- Nút tải file MP3 của chương đang phát -->
+        <a id="btn-player-download" href="#" class="transport-btn" title="Tải file MP3 chương này">
+          <i data-lucide="download" class="w-4 h-4"></i>
+        </a>
+      </div>
+
+    </div>
+
+  </aside>
+
+  <!-- MODAL NHẬP TRUYỆN THỦ CÔNG -->
+  <div id="modal-custom-story" class="hidden sheet-modal-backdrop">
+    <div class="sheet-modal-card">
+      <div class="flex items-center justify-between border-b border-slate-200/60 pb-3">
+        <h3 class="font-bold text-base text-slate-900 flex items-center space-x-2">
+          <i data-lucide="file-text" class="w-4 h-4 text-rose-500"></i>
+          <span>Nhập nội dung truyện thủ công</span>
+        </h3>
+        <button id="btn-close-custom-modal" class="p-1 rounded-lg text-slate-400 hover:text-slate-700 transition">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <form id="form-custom-story" class="space-y-3.5">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Tên truyện / Tiêu đề:</label>
+          <input type="text" id="custom-story-title" placeholder="Ví dụ: Hoàng Tử Bé" required class="w-full px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Tác giả (tùy chọn):</label>
+          <input type="text" id="custom-story-author" placeholder="Ví dụ: Antoine de Saint-Exupéry" class="w-full px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Tên chương:</label>
+          <input type="text" id="custom-chapter-title" placeholder="Chương 1: Mở đầu" required class="w-full px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Nội dung chương truyện:</label>
+          <textarea id="custom-chapter-content" rows="6" placeholder="Dán văn bản hoặc đoạn trích của chương truyện vào đây..." required class="w-full px-3 py-2 text-sm"></textarea>
+        </div>
+        <div class="flex justify-end space-x-2 pt-2 border-t border-slate-200/60">
+          <button type="button" id="btn-cancel-custom" class="btn-secondary-desktop">Hủy</button>
+          <button type="submit" class="btn-primary-desktop">Tạo & Chuyển thành Sách nói</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL GỢI Ý TẠO AUDIO (KHI ĐỌC XONG) -->
+  <div id="modal-audio-prompt" class="hidden sheet-modal-backdrop">
+    <div class="sheet-modal-card text-center items-center">
+      <div class="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-200/60 flex items-center justify-center text-rose-500 shadow-sm">
+        <i data-lucide="headphones" class="w-7 h-7"></i>
+      </div>
+      <div class="space-y-1.5">
+        <span class="inline-block px-2.5 py-0.5 rounded-full text-[10.5px] font-semibold bg-rose-100/70 text-rose-700">
+          Gợi ý Sách nói AI
+        </span>
+        <h3 class="font-bold text-base text-slate-900">Bạn có muốn tạo bản Audio không?</h3>
+        <p class="text-xs text-slate-600 leading-relaxed max-w-sm">
+          Bạn vừa đọc xong <span id="prompt-chapter-title" class="font-semibold text-rose-600">Chương này</span>. Tạo ngay bản audio với giọng đọc AI truyền cảm?
+        </p>
+      </div>
+      <div class="space-y-2 w-full pt-2">
+        <button id="btn-prompt-convert-this" class="w-full py-2.5 btn-primary-desktop justify-center">
+          <i data-lucide="sparkles" class="w-4 h-4"></i>
+          <span>Tạo Audio cho chương này ngay</span>
+        </button>
+        <button id="btn-prompt-convert-all" class="w-full py-2 btn-secondary-desktop justify-center">
+          <span>Tạo Audio cho tất cả các chương chưa chuyển</span>
+        </button>
+        <button id="btn-prompt-dismiss" class="w-full py-1.5 text-xs text-slate-400 hover:text-slate-600">
+          Để sau, chưa cần tạo
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL ĐĂNG NHẬP THÀNH VIÊN (PHIÊN BẢN 1.8) -->
+  <div id="modal-login" class="hidden sheet-modal-backdrop">
+    <div class="sheet-modal-card max-w-md flex flex-col space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-200/60 pb-3">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-500 to-indigo-600 text-white flex items-center justify-center shadow-sm">
+            <i data-lucide="user-check" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-base text-slate-900">Đăng nhập thành viên</h3>
+            <p class="text-[11px] text-slate-500">Đồng bộ thư viện truyện, sách nói & lịch sử cá nhân</p>
+          </div>
+        </div>
+        <button id="btn-close-login-modal" class="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <form id="form-login" class="space-y-3.5">
+        <div id="login-error-msg" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 text-xs font-medium flex items-center space-x-2">
+          <i data-lucide="alert-circle" class="w-4 h-4 shrink-0"></i>
+          <span id="login-error-text">Tên đăng nhập hoặc mật khẩu không chính xác.</span>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Tên đăng nhập</label>
+          <div class="relative">
+            <i data-lucide="user" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+            <input type="text" id="login-username" class="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white" placeholder="jason" required autocomplete="username">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Mật khẩu</label>
+          <div class="relative">
+            <i data-lucide="lock" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+            <input type="password" id="login-password" class="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white" placeholder="••••" required autocomplete="current-password">
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-1">
+          <label class="flex items-center space-x-2 text-xs text-slate-600 cursor-pointer select-none">
+            <input type="checkbox" id="login-remember" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" checked>
+            <span>Ghi nhớ phiên đăng nhập</span>
+          </label>
+          <button type="button" id="btn-quick-fill-login" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
+            Điền mẫu (jason / 1987)
+          </button>
+        </div>
+
+        <div class="pt-2">
+          <button type="submit" id="btn-submit-login" class="w-full py-2.5 rounded-xl btn-primary-desktop justify-center text-sm font-semibold shadow-md flex items-center space-x-2">
+            <i data-lucide="log-in" class="w-4 h-4"></i>
+            <span>Đăng nhập</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL QUẢN LÝ THƯ VIỆN & LỊCH SỬ CÁ NHÂN (4 TABS) -->
+  <div id="modal-favorites" class="hidden sheet-modal-backdrop">
+    <div class="sheet-modal-card max-w-2xl max-h-[85vh] flex flex-col">
+      <div class="flex items-center justify-between border-b border-slate-200/60 pb-3">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-rose-500 to-indigo-600 text-white flex items-center justify-center shadow-sm">
+            <i data-lucide="library" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-base text-slate-900" id="library-modal-title">Tủ sách & Lịch sử cá nhân</h3>
+            <p class="text-[11px] text-slate-500" id="library-modal-subtitle">Quản lý truyện đã lưu, sách nói, lịch sử đọc và nghe theo tài khoản</p>
+          </div>
+        </div>
+        <button id="btn-close-favorites-modal" class="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <!-- 4 Tabs Chức Năng -->
+      <div class="flex items-center space-x-1.5 border-b border-slate-200/60 pb-2 overflow-x-auto">
+        <button id="tab-fav-stories" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200/80 transition flex items-center space-x-1.5 shrink-0">
+          <i data-lucide="book" class="w-3.5 h-3.5"></i>
+          <span>Thư viện truyện</span>
+          <span id="badge-fav-stories-count" class="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500 text-white font-bold leading-none">0</span>
+        </button>
+        <button id="tab-lib-audiobooks" class="px-3 py-1.5 rounded-xl text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition flex items-center space-x-1.5 shrink-0">
+          <i data-lucide="headphones" class="w-3.5 h-3.5"></i>
+          <span>Kho Sách nói</span>
+          <span id="badge-lib-audiobooks-count" class="px-1.5 py-0.2 rounded-full text-[10px] bg-indigo-500 text-white font-bold leading-none">0</span>
+        </button>
+        <button id="tab-lib-read-history" class="px-3 py-1.5 rounded-xl text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition flex items-center space-x-1.5 shrink-0">
+          <i data-lucide="book-open" class="w-3.5 h-3.5"></i>
+          <span>Lịch sử đọc</span>
+          <span id="badge-lib-read-count" class="px-1.5 py-0.2 rounded-full text-[10px] bg-cyan-500 text-white font-bold leading-none">0</span>
+        </button>
+        <button id="tab-lib-listen-history" class="px-3 py-1.5 rounded-xl text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition flex items-center space-x-1.5 shrink-0">
+          <i data-lucide="disc" class="w-3.5 h-3.5"></i>
+          <span>Lịch sử nghe</span>
+          <span id="badge-lib-listen-count" class="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500 text-white font-bold leading-none">0</span>
+        </button>
+      </div>
+
+      <!-- Containers for 4 tabs -->
+      <div class="flex-1 overflow-y-auto space-y-2 py-2">
+        <!-- 1. Thư viện truyện -->
+        <div id="container-fav-stories" class="space-y-2"></div>
+        <!-- 2. Kho Sách nói -->
+        <div id="container-lib-audiobooks" class="hidden space-y-2"></div>
+        <!-- 3. Lịch sử đọc -->
+        <div id="container-lib-read-history" class="hidden space-y-2"></div>
+        <!-- 4. Lịch sử nghe -->
+        <div id="container-lib-listen-history" class="hidden space-y-2"></div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Audio Player Core (hidden HTML5 audio element) -->
+  <audio id="main-audio" class="hidden"></audio>
+
+  <!-- Application Script -->
+  <script src="/static/js/app.js"></script>
+
+  <!-- Lucide Icon Initialization -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      if (window.lucide) {
+        lucide.createIcons();
+      }
+
+      // Phát hiện thiết bị Android / Mobile để kích hoạt giao diện điều hướng nằm ngang
+      const isAndroidDevice = /Android/i.test(navigator.userAgent) || window.innerWidth < 1024;
+      if (isAndroidDevice) {
+        document.body.classList.add('android-mode');
+      }
+
+      window.addEventListener('resize', () => {
+        if (/Android/i.test(navigator.userAgent) || window.innerWidth < 1024) {
+          document.body.classList.add('android-mode');
+        } else {
+          document.body.classList.remove('android-mode');
+        }
+      });
+
+      // Nút cài đặt máy chủ trên Android Top Bar (khi chạy trong Android App Native)
+      const btnAndroidSettings = document.getElementById('btn-android-settings');
+      if (btnAndroidSettings) {
+        if (window.AndroidBridge && typeof window.AndroidBridge.openServerConfig === 'function') {
+          btnAndroidSettings.classList.remove('hidden');
+          btnAndroidSettings.addEventListener('click', () => {
+            window.AndroidBridge.openServerConfig();
+          });
+        }
+      }
+
+      // Nút tìm kiếm trên Android Top Bar
+      const btnAndroidSearch = document.getElementById('btn-android-search');
+      if (btnAndroidSearch) {
+        btnAndroidSearch.addEventListener('click', () => {
+          const fetchBar = document.getElementById('section-fetch-bar');
+          const inputUrl = document.getElementById('input-story-url');
+          if (fetchBar) fetchBar.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (inputUrl) setTimeout(() => inputUrl.focus(), 350);
+        });
+      }
+
+
+      // Sidebar interactions & quick navigations
+      const navBtnHome = document.getElementById('nav-btn-home');
+      const navBtnVoices = document.getElementById('nav-btn-voices');
+      const voiceStudioPanel = document.getElementById('voice-studio-panel');
+      const btnDemo = document.getElementById('btn-demo-story');
+      const btnCustom = document.getElementById('btn-open-custom-modal');
+
+      if (navBtnHome) {
+        navBtnHome.addEventListener('click', () => {
+          document.querySelectorAll('.nav-item-btn').forEach(b => b.classList.remove('active'));
+          navBtnHome.classList.add('active');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+      }
+
+      if (navBtnVoices) {
+        navBtnVoices.addEventListener('click', () => {
+          document.querySelectorAll('.nav-item-btn').forEach(b => b.classList.remove('active'));
+          navBtnVoices.classList.add('active');
+          if (voiceStudioPanel) {
+            voiceStudioPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } else if (btnDemo) {
+            btnDemo.click();
+          }
+        });
+      }
+
+      // Quick search in sidebar filtering
+      const quickSearch = document.getElementById('sidebar-quick-search');
+      if (quickSearch) {
+        quickSearch.addEventListener('input', (e) => {
+          const query = e.target.value.toLowerCase().trim();
+          const items = document.querySelectorAll('#chapter-list-container > div');
+          items.forEach(it => {
+            const txt = it.textContent.toLowerCase();
+            it.style.display = txt.includes(query) ? '' : 'none';
+          });
+        });
+      }
+    });
+  </script>
+
+</body>
+</html>
