@@ -1,4 +1,5 @@
 import os
+import sys
 import re
 import unicodedata
 from urllib.parse import quote
@@ -197,6 +198,44 @@ async def clear_user_history(history_type: str, authorization: Optional[str] = H
 
 
 # ----------------- CÁC ENDPOINT API: TRUYỆN & SÁCH NÓI -----------------
+
+@app.get("/api/system/status")
+async def get_system_status():
+    """Kiểm tra tài nguyên phần cứng, số nhân CPU, chế độ lượng tử hóa int8 và mức độ chạy song song"""
+    cpu_cores = os.cpu_count() or 1
+    default_prec = "int8" if sys.platform != "darwin" else "fp32"
+    precision = os.environ.get("VIENEU_PRECISION", default_prec).lower()
+    threads = int(os.environ.get("VIENEU_THREADS", str(cpu_cores)))
+    vieneu_ready = (tts._vieneu is not None)
+    edge_concurrency = int(os.environ.get("EDGE_TTS_CONCURRENCY", "4"))
+    vieneu_concurrency = int(os.environ.get("VIENEU_CONCURRENCY", str(max(1, cpu_cores // 2))))
+
+    return {
+        "status": "online",
+        "platform": sys.platform,
+        "is_codespaces": bool(os.environ.get("CODESPACES")),
+        "cpu_cores": cpu_cores,
+        "vieneu": {
+            "is_model_loaded": vieneu_ready,
+            "precision": precision,
+            "threads": threads,
+            "parallel_chapters": vieneu_concurrency
+        },
+        "edge_tts": {
+            "parallel_chapters": edge_concurrency
+        },
+        "active_tasks": [
+            {
+                "task_id": t.task_id,
+                "story_id": t.story_id,
+                "status": t.status,
+                "completed_chapters": t.completed_chapters,
+                "total_chapters": t.total_chapters,
+                "percent": t.current_chapter_percent
+            }
+            for t in task_manager.tasks.values() if t.status in ["processing", "queued", "paused"]
+        ]
+    }
 
 @app.get("/api/voices")
 async def get_voices():
