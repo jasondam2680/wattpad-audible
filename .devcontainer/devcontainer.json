@@ -1,6 +1,11 @@
 {
   "name": "Wattpad AI Audiobook",
   "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "containerEnv": {
+    "VIENEU_PRECISION": "int8",
+    "EDGE_TTS_CONCURRENCY": "4",
+    "OMP_NUM_THREADS": "4"
+  },
   "postCreateCommand": "sudo apt-get update && sudo apt-get install -y libsndfile1 ffmpeg && pip install -r backend/requirements.txt",
   "forwardPorts": [8000],
   "portsAttributes": {

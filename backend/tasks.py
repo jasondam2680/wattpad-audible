@@ -32,8 +32,9 @@ class TaskManager:
         self.cancel_flags: Dict[str, bool] = {}
         # Theo dõi phiên chuyển đổi đang chạy theo thiết bị đầu cuối: key -> task_id
         self.device_active_tasks: Dict[str, str] = {}
-        # Giới hạn tối đa 2 tác vụ render AI đồng thời để chống quá tải CPU
-        self.concurrency_semaphore = asyncio.Semaphore(2)
+        # Giới hạn số tác vụ tổng thể, tự động co giãn theo số nhân CPU
+        max_task_workers = int(os.environ.get("MAX_TASK_CONCURRENCY", max(2, os.cpu_count() or 2)))
+        self.concurrency_semaphore = asyncio.Semaphore(max_task_workers)
 
     def _save_task_state(self, task: TaskProgress):
         """Lưu trạng thái tác vụ vào SQLite và cập nhật memory cache"""
@@ -248,88 +249,113 @@ class TaskManager:
                         raise asyncio.CancelledError("Tác vụ đã bị hủy bởi người dùng.")
 
             try:
-                for idx, cid in enumerate(chapter_ids):
-                    await check_pause_cancel()
+                # Tối ưu hóa mức độ song song của các chương:
+                # - Edge-TTS: cloud API (network I/O), chạy 4-6 chương cùng lúc để đạt tốc độ cao nhất
+                # - VieNeu-TTS: CPU ONNX, chạy 1 chương trên 2-core, 2 chương trên 4-core, 4 chương trên 8-core
+                cpu_cores = os.cpu_count() or 2
+                if voice_config.engine == "edge-tts":
+                    chap_concurrency = int(os.environ.get("EDGE_TTS_CONCURRENCY", "4"))
+                else:
+                    chap_concurrency = int(os.environ.get("VIENEU_CONCURRENCY", str(max(1, cpu_cores // 2))))
 
-                    chapter_obj = chapter_map.get(cid)
-                    chapter_title = chapter_obj.title if chapter_obj else f"Chương {cid}"
+                chap_semaphore = asyncio.Semaphore(chap_concurrency)
+                task_lock = asyncio.Lock()
+                logger.info(f"Khởi chạy chuyển đổi task {task_id} với mức song song {chap_concurrency} chương đồng thời ({voice_config.engine}).")
 
-                    # Kiểm tra nếu chương này ĐÃ có audio: BỎ QUA chuyển đổi lại
-                    existing_audio = self.tts.get_audio_path(story_id, cid)
-                    if existing_audio and existing_audio.exists() and existing_audio.stat().st_size > 1000:
-                        logger.info(f"[Tiếp tục phiên] Chương {cid} ({chapter_title}) đã có file audio từ trước.")
-                        meta = self.tts.get_audio_metadata(story_id, cid)
-                        v_name = (meta.get("voice") if meta else None) or (chapter_obj.audio_voice if chapter_obj else None) or "Thái Sơn"
-                        v_eng = (meta.get("engine") if meta else None) or (chapter_obj.audio_engine if chapter_obj else None) or "vieneu"
-                        self.update_chapter_audio_status(
-                            story_id,
-                            cid,
-                            duration=0.0,
-                            size_bytes=existing_audio.stat().st_size,
-                            voice_name=v_name,
-                            engine=v_eng
-                        )
-                        continue
+                async def process_single_chapter(cid: int):
+                    async with chap_semaphore:
+                        await check_pause_cancel()
 
-                    task.current_chapter_title = chapter_title
-                    task.current_chapter_percent = 0
-                    self._save_task_state(task)
+                        chapter_obj = chapter_map.get(cid)
+                        chapter_title = chapter_obj.title if chapter_obj else f"Chương {cid}"
 
-                    # 1. Lấy nội dung chữ của chương
-                    logger.info(f"Đang lấy nội dung chương {cid}: {chapter_title}")
-                    text = ""
-                    custom_file = DATA_DIR / "custom_texts" / story_id / f"{cid}.txt"
-                    if custom_file.exists():
+                        # Kiểm tra nếu chương này ĐÃ có audio: BỎ QUA chuyển đổi lại
+                        existing_audio = self.tts.get_audio_path(story_id, cid)
+                        if existing_audio and existing_audio.exists() and existing_audio.stat().st_size > 1000:
+                            logger.info(f"[Tiếp tục phiên] Chương {cid} ({chapter_title}) đã có file audio từ trước.")
+                            meta = self.tts.get_audio_metadata(story_id, cid)
+                            v_name = (meta.get("voice") if meta else None) or (chapter_obj.audio_voice if chapter_obj else None) or "Thái Sơn"
+                            v_eng = (meta.get("engine") if meta else None) or (chapter_obj.audio_engine if chapter_obj else None) or "vieneu"
+                            self.update_chapter_audio_status(
+                                story_id,
+                                cid,
+                                duration=0.0,
+                                size_bytes=existing_audio.stat().st_size,
+                                voice_name=v_name,
+                                engine=v_eng
+                            )
+                            return
+
+                        async with task_lock:
+                            task.current_chapter_title = chapter_title
+                            self._save_task_state(task)
+
+                        # 1. Lấy nội dung chữ của chương
+                        logger.info(f"Đang lấy nội dung chương {cid}: {chapter_title}")
+                        text = ""
+                        custom_file = DATA_DIR / "custom_texts" / story_id / f"{cid}.txt"
+                        if custom_file.exists():
+                            try:
+                                with open(custom_file, "r", encoding="utf-8") as f:
+                                    text = f.read()
+                            except Exception as e:
+                                logger.error(f"Lỗi đọc file custom text {custom_file}: {e}")
+
+                        if not text:
+                            try:
+                                text = await asyncio.to_thread(self.scraper.get_chapter_text, cid)
+                            except Exception as e:
+                                logger.error(f"Lỗi tải text chương {cid}: {e}")
+
+                        if not text:
+                            logger.warning(f"Chương {cid} không có nội dung chữ, bỏ qua.")
+                            async with task_lock:
+                                task.completed_chapters += 1
+                                self._save_task_state(task)
+                            return
+
+                        # 2. Callback cập nhật tiến trình %
+                        def on_progress(percent: int):
+                            if chap_concurrency == 1:
+                                task.current_chapter_percent = percent
+                            else:
+                                overall = int(((task.completed_chapters + (percent / 100.0)) / max(1, task.total_chapters)) * 100)
+                                task.current_chapter_percent = min(99, overall)
+
+                        # 3. Chuyển đổi TTS
                         try:
-                            with open(custom_file, "r", encoding="utf-8") as f:
-                                text = f.read()
+                            res = await self.tts.convert_chapter_to_audio(
+                                story_id=story_id,
+                                chapter_id=cid,
+                                chapter_title=chapter_title,
+                                story_title=story.title,
+                                story_author=story.author,
+                                text=text,
+                                config=voice_config,
+                                progress_callback=on_progress,
+                                check_pause_cancel=check_pause_cancel
+                            )
+                            self.update_chapter_audio_status(
+                                story_id=story_id,
+                                chapter_id=cid,
+                                duration=res["duration"],
+                                size_bytes=res["size_bytes"],
+                                voice_name=voice_config.voice,
+                                engine=voice_config.engine
+                            )
+                        except asyncio.CancelledError:
+                            raise
                         except Exception as e:
-                            logger.error(f"Lỗi đọc file custom text {custom_file}: {e}")
+                            logger.exception(f"Lỗi khi chuyển đổi TTS chương {cid}: {e}")
 
-                    if not text:
-                        try:
-                            text = await asyncio.to_thread(self.scraper.get_chapter_text, cid)
-                        except Exception as e:
-                            logger.error(f"Lỗi tải text chương {cid}: {e}")
+                        async with task_lock:
+                            task.completed_chapters += 1
+                            if chap_concurrency > 1:
+                                task.current_chapter_percent = int((task.completed_chapters / max(1, task.total_chapters)) * 100)
+                            self._save_task_state(task)
 
-                    if not text:
-                        logger.warning(f"Chương {cid} không có nội dung chữ, bỏ qua.")
-                        task.completed_chapters += 1
-                        self._save_task_state(task)
-                        continue
-
-                    # 2. Callback cập nhật tiến trình %
-                    def on_progress(percent: int):
-                        task.current_chapter_percent = percent
-
-                    # 3. Chuyển đổi TTS
-                    try:
-                        res = await self.tts.convert_chapter_to_audio(
-                            story_id=story_id,
-                            chapter_id=cid,
-                            chapter_title=chapter_title,
-                            story_title=story.title,
-                            story_author=story.author,
-                            text=text,
-                            config=voice_config,
-                            progress_callback=on_progress,
-                            check_pause_cancel=check_pause_cancel
-                        )
-                        self.update_chapter_audio_status(
-                            story_id=story_id,
-                            chapter_id=cid,
-                            duration=res["duration"],
-                            size_bytes=res["size_bytes"],
-                            voice_name=voice_config.voice,
-                            engine=voice_config.engine
-                        )
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as e:
-                        logger.exception(f"Lỗi khi chuyển đổi TTS chương {cid}: {e}")
-
-                    task.completed_chapters += 1
-                    self._save_task_state(task)
+                # Thực thi chuyển đổi các chương song song có kiểm soát
+                await asyncio.gather(*(process_single_chapter(cid) for cid in chapter_ids))
 
                 task.status = "completed"
                 task.current_chapter_title = "Hoàn tất chuyển đổi tất cả các chương!"

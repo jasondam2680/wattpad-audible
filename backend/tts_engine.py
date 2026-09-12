@@ -87,9 +87,20 @@ class TTSEngine:
         """Khởi tạo lười (lazy loading) VieNeu-TTS v3 Turbo qua ONNX"""
         if self._vieneu is None:
             try:
-                logger.info("Đang khởi tạo mô hình VieNeu-TTS v3 Turbo via ONNX (48kHz)...")
+                import sys
+                cpu_cores = os.cpu_count() or 4
+                # Trên Linux/Codespaces CPU: int8 cho tốc độ nhanh gấp ~3x với tập lệnh AVX-512/VNNI
+                default_prec = "int8" if sys.platform != "darwin" else "fp32"
+                precision = os.environ.get("VIENEU_PRECISION", default_prec).lower()
+                threads = int(os.environ.get("VIENEU_THREADS", str(cpu_cores)))
+
+                logger.info(f"Đang khởi tạo mô hình VieNeu-TTS v3 Turbo via ONNX (precision={precision}, threads={threads})...")
                 from vieneu import Vieneu
-                self._vieneu = Vieneu()
+                try:
+                    self._vieneu = Vieneu(mode="v3turbo", precision=precision, threads=threads)
+                except Exception as pe:
+                    logger.warning(f"Không thể khởi tạo với precision={precision} ({pe}), tự động chuyển sang fp32...")
+                    self._vieneu = Vieneu(mode="v3turbo", precision="fp32", threads=threads)
                 logger.info("VieNeu-TTS v3 Turbo đã sẵn sàng!")
             except ImportError as ie:
                 logger.error(f"Thư viện vieneu chưa được cài đặt hoặc thiếu runtime ONNX: {ie}")
@@ -254,7 +265,12 @@ class TTSEngine:
                 if idx == 0 and config.emotion_cue:
                     chunk_text = f"{config.emotion_cue} {chunk}"
 
-                audio_data = await asyncio.to_thread(vieneu.infer, chunk_text, voice=config.voice)
+                audio_data = await asyncio.to_thread(
+                    vieneu.infer,
+                    chunk_text,
+                    voice=config.voice,
+                    apply_watermark=False
+                )
                 audio_arrays.append(audio_data)
 
                 percent = int(((idx + 1) / total_chunks) * 100)
