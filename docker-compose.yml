@@ -1,0 +1,41 @@
+# ==============================================================================
+# WATTPAD AI AUDIOBOOK - DOCKER COMPOSE CONFIGURATION
+# ==============================================================================
+
+services:
+  wattpad-audiobook:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wattpad-audiobook:latest
+    container_name: wattpad-audiobook
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PORT=8000
+      - HOST=0.0.0.0
+      - TRANSLATION_PROVIDER=${TRANSLATION_PROVIDER:-openai}
+      - TRANSLATION_API_KEY=${TRANSLATION_API_KEY:-}
+      - TRANSLATION_BASE_URL=${TRANSLATION_BASE_URL:-https://api.openai.com/v1}
+      - TRANSLATION_MODEL=${TRANSLATION_MODEL:-gpt-4o-mini}
+      - GLOBAL_TRANSLATION_CONCURRENCY=${GLOBAL_TRANSLATION_CONCURRENCY:-2}
+      - TTS_CONCURRENCY_EDGE=${TTS_CONCURRENCY_EDGE:-4}
+      - TTS_CONCURRENCY_VIENEU=${TTS_CONCURRENCY_VIENEU:-1}
+    volumes:
+      # Persistent storage for SQLite database, audio MP3s, ZIP archives, and cached stories
+      - ./backend/data:/app/backend/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/languages"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

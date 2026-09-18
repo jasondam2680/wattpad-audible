@@ -1,0 +1,54 @@
+# Git
+.git/
+.gitignore
+
+# Python virtual environment and cache
+venv/
+env/
+ENV/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local data & database (mounted via volumes in production)
+backend/data/database.sqlite*
+backend/data/audio/*
+!backend/data/audio/.gitkeep
+backend/data/archives/*
+!backend/data/archives/.gitkeep
+backend/data/stories/*
+!backend/data/stories/.gitkeep
+backend/data/custom_texts/*
+!backend/data/custom_texts/.gitkeep
+backend/data/tasks/*
+!backend/data/tasks/.gitkeep
+backend/data/users/*
+!backend/data/users/.gitkeep
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+
+# IDE & Editor Configurations
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Android Project (Separate build target)
+android/

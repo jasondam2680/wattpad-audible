@@ -53,7 +53,26 @@
 
 ## 🚀 Hướng dẫn khởi động
 
-### 1. Khởi động nhanh (Khuyên dùng)
+### 1. Khởi động bằng Docker (Khuyên dùng - Tiện lợi & Nhanh chóng)
+
+Chỉ cần cài đặt Docker/Docker Desktop và chạy 1 lệnh duy nhất:
+
+```bash
+docker compose up -d --build
+```
+
+- Server sẽ tự động được khởi tạo tại: `http://localhost:8000`.
+- Toàn bộ dữ liệu truyện, database SQLite và file audio đã chuyển đổi được tự động mount lưu trữ an toàn tại thư mục `./backend/data`.
+- Xem logs máy chủ:
+  ```bash
+  docker compose logs -f
+  ```
+- Dừng máy chủ:
+  ```bash
+  docker compose down
+  ```
+
+### 2. Khởi động trực tiếp trên máy (Native Python)
 
 Mở Terminal tại thư mục dự án và chạy:
 
@@ -65,7 +84,7 @@ Hệ thống sẽ tự động kiểm tra thư viện và bật server tại:
 - **Trên máy tính**: `http://localhost:8000`
 - **Trên điện thoại Android (chung Wi-Fi)**: `http://<IP_MÁY_TÍNH>:8000` (địa chỉ IP sẽ hiển thị rõ trên terminal).
 
-### 2. Cấu hình Dịch thuật AI (Tùy chọn)
+### 3. Cấu hình Dịch thuật AI (Tùy chọn)
 
 Sao chép file `.env.example` thành `.env` và nhập API key của bạn:
 
