@@ -4,6 +4,7 @@ const readerState = {
   storyId: null,
   chapterId: null,
   chapterData: null,
+  languageView: 'vi', // 'vi' | 'orig'
   fontSize: 18,
   fontFamily: 'sans', // 'sans' | 'serif'
   theme: 'dark', // 'dark' | 'sepia' | 'light'
@@ -45,6 +46,11 @@ const el = {
   readerReadTime: document.getElementById('reader-read-time'),
   readerChapterTitle: document.getElementById('reader-chapter-title'),
   readerInlineAudioBox: document.getElementById('reader-inline-audio-box'),
+  readerBilingualSwitcher: document.getElementById('reader-bilingual-switcher'),
+  btnReaderViewVi: document.getElementById('btn-reader-view-vi'),
+  btnReaderViewOrig: document.getElementById('btn-reader-view-orig'),
+  readerOrigLangLabel: document.getElementById('reader-orig-lang-label'),
+  readerTranslationCachedBadge: document.getElementById('reader-translation-cached-badge'),
   readerBodyText: document.getElementById('reader-body-text'),
 
   btnBottomPrev: document.getElementById('btn-bottom-prev'),
@@ -220,6 +226,64 @@ async function saveReadingHistory(storyId, storyTitle, storyCover, chapterId, ch
 }
 
 
+function renderBodyText(text) {
+  if (!text || text.trim().length === 0) {
+    el.readerBodyText.innerHTML = `
+      <div class="py-12 text-center text-slate-400">
+        <p>Nội dung chương này trống hoặc đang được bảo vệ bởi Wattpad.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const rawParagraphs = text.split(/\n\s*\n|\r\n\s*\r\n/);
+  const formattedHtml = rawParagraphs
+    .map(p => p.trim())
+    .filter(p => p.length > 0)
+    .map(p => `<p class="paragraph-item">${escapeHtml(p).replace(/\n/g, '<br>')}</p>`)
+    .join('');
+  el.readerBodyText.innerHTML = formattedHtml;
+
+  // Cập nhật số từ và thời gian đọc theo văn bản đang hiển thị
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  const readMins = Math.max(1, Math.ceil(words / 220));
+  el.readerWordCount.innerHTML = `<i data-lucide="file-text" class="w-3.5 h-3.5 text-indigo-400"></i><span>${words.toLocaleString('vi-VN')} từ</span>`;
+  el.readerReadTime.innerHTML = `<i data-lucide="clock" class="w-3.5 h-3.5 text-pink-400"></i><span>~${readMins} phút đọc</span>`;
+}
+
+function updateBilingualSwitchUI() {
+  const data = readerState.chapterData;
+  if (!data) return;
+
+  const hasTranslation = Boolean(data.is_translated || (data.translated_text && data.original_text));
+  if (el.readerBilingualSwitcher) {
+    if (hasTranslation) {
+      el.readerBilingualSwitcher.classList.remove('hidden');
+      if (el.readerOrigLangLabel) {
+        el.readerOrigLangLabel.textContent = (data.detected_language || 'EN').toUpperCase();
+      }
+      if (readerState.languageView === 'vi') {
+        el.btnReaderViewVi?.classList.add('bg-indigo-600/80', 'text-white');
+        el.btnReaderViewVi?.classList.remove('text-slate-400');
+        el.btnReaderViewOrig?.classList.remove('bg-indigo-600/80', 'text-white');
+        el.btnReaderViewOrig?.classList.add('text-slate-400');
+        renderBodyText(data.translated_text || data.text);
+      } else {
+        el.btnReaderViewOrig?.classList.add('bg-indigo-600/80', 'text-white');
+        el.btnReaderViewOrig?.classList.remove('text-slate-400');
+        el.btnReaderViewVi?.classList.remove('bg-indigo-600/80', 'text-white');
+        el.btnReaderViewVi?.classList.add('text-slate-400');
+        renderBodyText(data.original_text || data.text);
+      }
+    } else {
+      el.readerBilingualSwitcher.classList.add('hidden');
+      renderBodyText(data.text);
+    }
+  } else {
+    renderBodyText(data.text);
+  }
+}
+
 function renderChapter(data) {
   document.title = `${data.chapter_title} - ${data.story_title || 'Wattpad'}`;
 
@@ -229,28 +293,9 @@ function renderChapter(data) {
   el.readerMetaStoryTitle.innerHTML = `<i data-lucide="book" class="w-3.5 h-3.5"></i><span>${data.story_title || 'Wattpad Story'}</span>`;
   el.readerChapterTitle.textContent = data.chapter_title || `Chương ${data.chapter_id}`;
 
-  // Đếm từ và thời gian đọc
-  const words = data.text ? data.text.trim().split(/\s+/).filter(Boolean).length : 0;
-  const readMins = Math.max(1, Math.ceil(words / 220));
-  el.readerWordCount.innerHTML = `<i data-lucide="file-text" class="w-3.5 h-3.5 text-indigo-400"></i><span>${words.toLocaleString('vi-VN')} từ</span>`;
-  el.readerReadTime.innerHTML = `<i data-lucide="clock" class="w-3.5 h-3.5 text-pink-400"></i><span>~${readMins} phút đọc</span>`;
-
-  // Format các đoạn văn bản
-  if (!data.text || data.text.trim().length === 0) {
-    el.readerBodyText.innerHTML = `
-      <div class="py-12 text-center text-slate-400">
-        <p>Nội dung chương này trống hoặc đang được bảo vệ bởi Wattpad.</p>
-      </div>
-    `;
-  } else {
-    const rawParagraphs = data.text.split(/\n\s*\n|\r\n\s*\r\n/);
-    const formattedHtml = rawParagraphs
-      .map(p => p.trim())
-      .filter(p => p.length > 0)
-      .map(p => `<p class="paragraph-item">${escapeHtml(p).replace(/\n/g, '<br>')}</p>`)
-      .join('');
-    el.readerBodyText.innerHTML = formattedHtml;
-  }
+  // Mặc định hiển thị bản dịch tiếng Việt nếu có
+  readerState.languageView = 'vi';
+  updateBilingualSwitchUI();
 
   // Danh sách dropdown chuyển chương
   if (Array.isArray(data.parts) && data.parts.length > 0) {
@@ -581,6 +626,20 @@ function setupEventListeners() {
   el.btnThemeDark.addEventListener('click', () => applyTheme('dark'));
   el.btnThemeSepia.addEventListener('click', () => applyTheme('sepia'));
   el.btnThemeLight.addEventListener('click', () => applyTheme('light'));
+
+  // Chuyển đổi ngôn ngữ đọc (Song ngữ: Tiếng Việt / Văn bản gốc)
+  if (el.btnReaderViewVi) {
+    el.btnReaderViewVi.addEventListener('click', () => {
+      readerState.languageView = 'vi';
+      updateBilingualSwitchUI();
+    });
+  }
+  if (el.btnReaderViewOrig) {
+    el.btnReaderViewOrig.addEventListener('click', () => {
+      readerState.languageView = 'orig';
+      updateBilingualSwitchUI();
+    });
+  }
 
   // Nút thử lại khi lỗi
   el.btnReaderRetry.addEventListener('click', () => {

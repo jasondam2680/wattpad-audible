@@ -26,6 +26,14 @@ const state = {
     volume: "+0%"
   },
 
+  // Cấu hình dịch thuật văn học AI
+  translationConfig: {
+    enabled: true,
+    source_language: "auto",
+    target_language: "vi",
+    prompt_version: "literary_vi_v1"
+  },
+
   // Audio Player State
   currentPlayingChapterId: null,
   isPlaying: false,
@@ -151,6 +159,22 @@ const elements = {
   storyChapterCount: document.getElementById('story-chapter-count'),
   storyConvertedCount: document.getElementById('story-converted-count'),
   storyDescription: document.getElementById('story-description'),
+  badgeStoryLang: document.getElementById('badge-story-lang'),
+
+  // Translation UI Elements
+  sectionTranslationControls: document.getElementById('section-translation-controls'),
+  checkboxEnableTranslation: document.getElementById('checkbox-enable-translation'),
+  badgePromptVersion: document.getElementById('badge-prompt-version'),
+  translationDescText: document.getElementById('translation-desc-text'),
+  translationStatusHint: document.getElementById('translation-status-hint'),
+  btnOpenPreviewTranslation: document.getElementById('btn-open-preview-translation'),
+  modalTranslationPreview: document.getElementById('modal-translation-preview'),
+  btnCloseTranslationModal: document.getElementById('btn-close-translation-modal'),
+  previewSourceText: document.getElementById('preview-source-text'),
+  previewTranslatedBox: document.getElementById('preview-translated-box'),
+  previewCachedTag: document.getElementById('preview-cached-tag'),
+  previewLatencyText: document.getElementById('preview-latency-text'),
+  btnSubmitPreviewTranslate: document.getElementById('btn-submit-preview-translate'),
 
   // Voice Studio (Engine Switcher, VieNeu & Edge-TTS)
   btnEngineVieneu: document.getElementById('btn-engine-vieneu'),
@@ -655,6 +679,27 @@ function setupEventListeners() {
     });
   }
 
+  // Phiên bản 2.0: Dịch thuật AI & Dịch thử trực tiếp
+  if (elements.checkboxEnableTranslation) {
+    elements.checkboxEnableTranslation.addEventListener('change', (e) => {
+      state.translationConfig.enabled = e.target.checked;
+    });
+  }
+  if (elements.btnOpenPreviewTranslation) {
+    elements.btnOpenPreviewTranslation.addEventListener('click', openTranslationPreviewModal);
+  }
+  if (elements.btnCloseTranslationModal) {
+    elements.btnCloseTranslationModal.addEventListener('click', closeTranslationPreviewModal);
+  }
+  if (elements.modalTranslationPreview) {
+    elements.modalTranslationPreview.addEventListener('click', (e) => {
+      if (e.target === elements.modalTranslationPreview) closeTranslationPreviewModal();
+    });
+  }
+  if (elements.btnSubmitPreviewTranslate) {
+    elements.btnSubmitPreviewTranslate.addEventListener('click', handlePreviewTranslation);
+  }
+
   // Tự động kiểm tra và kết nối lại phiên chuyển đổi khi người dùng quay lại app từ màn hình Home Android
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
@@ -828,6 +873,35 @@ function renderStory(story) {
   elements.storyAuthor.innerHTML = `<i data-lucide="user" class="w-3.5 h-3.5"></i><span>${story.author}</span>`;
   elements.storyDescription.textContent = story.description || 'Không có tóm tắt.';
   elements.storyChapterCount.innerHTML = `<i data-lucide="list" class="w-3.5 h-3.5 text-indigo-400"></i><span>${story.numParts} chương</span>`;
+
+  // Cập nhật nhãn ngôn ngữ & trạng thái dịch tự động
+  const detectedLang = (story.detected_language || story.language || 'vi').toLowerCase();
+  if (elements.badgeStoryLang) {
+    if (detectedLang === 'vi' || detectedLang === 'vietnamese') {
+      elements.badgeStoryLang.textContent = '🇻🇳 Tiếng Việt';
+      elements.badgeStoryLang.className = 'inline-block px-2.5 py-0.5 rounded-full text-[10.5px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80 mb-1.5 ml-1';
+      if (elements.translationStatusHint) {
+        elements.translationStatusHint.innerHTML = `<i data-lucide="check-check" class="w-3 h-3 text-emerald-600"></i> Truyện gốc là Tiếng Việt (Không cần dịch)`;
+      }
+      if (elements.checkboxEnableTranslation) {
+        elements.checkboxEnableTranslation.checked = false;
+        state.translationConfig.enabled = false;
+      }
+    } else if (detectedLang === 'en' || detectedLang === 'english') {
+      elements.badgeStoryLang.textContent = '🇺🇸 English';
+      elements.badgeStoryLang.className = 'inline-block px-2.5 py-0.5 rounded-full text-[10.5px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200/80 mb-1.5 ml-1';
+      if (elements.translationStatusHint) {
+        elements.translationStatusHint.innerHTML = `<i data-lucide="sparkles" class="w-3 h-3 text-indigo-600"></i> Tự động dịch sang Tiếng Việt chuẩn văn học`;
+      }
+      if (elements.checkboxEnableTranslation) {
+        elements.checkboxEnableTranslation.checked = true;
+        state.translationConfig.enabled = true;
+      }
+    } else {
+      elements.badgeStoryLang.textContent = `🌐 ${detectedLang.toUpperCase()}`;
+      elements.badgeStoryLang.className = 'inline-block px-2.5 py-0.5 rounded-full text-[10.5px] font-semibold bg-amber-50 text-amber-700 border border-amber-200/80 mb-1.5 ml-1';
+    }
+  }
 
   // Cập nhật trạng thái nút Yêu thích truyện
   updateStoryFavButton();
@@ -1137,6 +1211,7 @@ async function startBatchConversion() {
         story_id: state.currentStory.id,
         chapter_ids: chapterIds,
         voice_config: state.voiceConfig,
+        translation_config: state.translationConfig,
         device_id: state.deviceId,
         user_id: state.currentUser?.username || null
       })
@@ -1185,10 +1260,10 @@ function startTaskPolling(taskId) {
 
       // Cập nhật thông báo thanh trạng thái Android
       if (task.status === 'processing') {
-        const overallPercent = Math.round(((task.completed_chapters) / (task.total_chapters || 1)) * 100);
+        const phaseName = task.current_phase === 'translating' ? 'Đang dịch AI' : 'Đang tạo giọng đọc';
         notifyAndroidBackgroundUpdate(
           'Wattpad AI Audiobook',
-          `Đang chuyển đổi (${task.completed_chapters}/${task.total_chapters}): ${task.current_chapter_title} (${task.current_chapter_percent}%)`
+          `${phaseName} (${task.completed_chapters}/${task.total_chapters}): ${task.current_chapter_title} (${task.current_chapter_percent}%)`
         );
       }
 
@@ -1260,12 +1335,21 @@ function updateProgressUI(task) {
   elements.taskOverallProgress.textContent = `${overallPercent}%`;
   elements.taskProgressBar.style.width = `${overallPercent}%`;
 
+  let phaseLabel = 'Đang xử lý';
+  if (task.current_phase === 'translating') {
+    phaseLabel = `Đang dịch văn học AI (${task.translation_percent || task.current_chapter_percent}%)`;
+  } else if (task.current_phase === 'synthesizing') {
+    phaseLabel = `Đang tạo giọng đọc TTS (${task.tts_percent || task.current_chapter_percent}%)`;
+  } else if (task.current_phase === 'scraping') {
+    phaseLabel = `Đang trích xuất nội dung`;
+  }
+
   if (task.status === 'paused') {
     elements.taskStatusText.textContent = `Đang tạm dừng (${task.completed_chapters}/${task.total_chapters} chương)`;
   } else {
-    elements.taskStatusText.textContent = `Đang chuyển đổi (${task.completed_chapters}/${task.total_chapters} chương)`;
+    elements.taskStatusText.textContent = `${phaseLabel} (${task.completed_chapters}/${task.total_chapters} chương)`;
   }
-  elements.taskChapterDetail.textContent = `Chương hiện tại: ${task.current_chapter_title} (${task.current_chapter_percent}%)`;
+  elements.taskChapterDetail.textContent = `Chương: ${task.current_chapter_title || 'Đang nạp...'} (${task.current_chapter_percent}%)`;
 }
 
 function updateTaskStateUI(status) {
@@ -1815,6 +1899,95 @@ function openLoginModal() {
 
 function closeLoginModal() {
   if (elements.modalLogin) elements.modalLogin.classList.add('hidden');
+}
+
+// ------------------- MODAL DỊCH THỬ AI VĂN HỌC (PREVIEW) -------------------
+
+function openTranslationPreviewModal() {
+  if (!elements.modalTranslationPreview) return;
+  
+  // Nạp câu mẫu nếu ô đang rỗng
+  if (elements.previewSourceText && !elements.previewSourceText.value.trim()) {
+    if (state.currentStory && state.currentStory.description) {
+      elements.previewSourceText.value = state.currentStory.description.slice(0, 300);
+    } else {
+      elements.previewSourceText.value = "The cold autumn wind howled through the barren trees as Eleanor pulled her coat tighter, watching the mysterious silhouette vanish into the misty shadows of the old cathedral.";
+    }
+  }
+
+  elements.modalTranslationPreview.classList.remove('hidden');
+  if (window.lucide) lucide.createIcons();
+}
+
+function closeTranslationPreviewModal() {
+  if (elements.modalTranslationPreview) {
+    elements.modalTranslationPreview.classList.add('hidden');
+  }
+}
+
+async function handlePreviewTranslation() {
+  const text = elements.previewSourceText ? elements.previewSourceText.value.trim() : '';
+  if (!text) {
+    alert('Vui lòng nhập đoạn văn bản nguồn tiếng Anh cần dịch thử.');
+    return;
+  }
+
+  if (elements.btnSubmitPreviewTranslate) {
+    elements.btnSubmitPreviewTranslate.disabled = true;
+    elements.btnSubmitPreviewTranslate.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin inline mr-1"></i> Đang dịch AI...`;
+  }
+  if (elements.previewTranslatedBox) {
+    elements.previewTranslatedBox.textContent = 'Đang kết nối Neural Translation Model & xử lý văn phong văn học...';
+  }
+  if (window.lucide) lucide.createIcons();
+
+  const startTime = Date.now();
+  try {
+    const res = await fetch('/api/translation/preview', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(state.authToken ? { 'Authorization': `Bearer ${state.authToken}` } : {})
+      },
+      body: JSON.stringify({
+        text,
+        source_language: 'auto',
+        target_language: 'vi',
+        story_id: state.currentStory ? state.currentStory.id : null
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Lỗi xử lý dịch thuật');
+    }
+
+    const data = await res.json();
+    if (elements.previewTranslatedBox) {
+      elements.previewTranslatedBox.textContent = data.translated_text || '(Không có kết quả)';
+    }
+    if (elements.previewCachedTag) {
+      if (data.cached) {
+        elements.previewCachedTag.classList.remove('hidden');
+      } else {
+        elements.previewCachedTag.classList.add('hidden');
+      }
+    }
+    if (elements.previewLatencyText) {
+      const elapsed = data.latency_ms || (Date.now() - startTime);
+      elements.previewLatencyText.textContent = `${elapsed}ms (${data.char_count || text.length} ký tự)`;
+    }
+  } catch (err) {
+    if (elements.previewTranslatedBox) {
+      elements.previewTranslatedBox.textContent = `Lỗi dịch thử: ${err.message}`;
+    }
+  } finally {
+    if (elements.btnSubmitPreviewTranslate) {
+      elements.btnSubmitPreviewTranslate.disabled = false;
+      elements.btnSubmitPreviewTranslate.innerHTML = `<i data-lucide="sparkles" class="w-4 h-4 inline mr-1"></i> Dịch thử ngay`;
+    }
+    if (window.lucide) lucide.createIcons();
+  }
 }
 
 async function handleLoginSubmit(e) {

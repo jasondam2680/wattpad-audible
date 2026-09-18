@@ -12,7 +12,8 @@ from contextlib import contextmanager
 
 from .models import (
     StoryInfo, ChapterInfo, TaskProgress,
-    UserProfile, UserLibraryStory, ReadingHistoryItem, ListeningHistoryItem
+    UserProfile, UserLibraryStory, ReadingHistoryItem, ListeningHistoryItem,
+    TranslationRecord
 )
 
 logger = logging.getLogger(__name__)
@@ -42,8 +43,11 @@ def verify_password(password: str, salt: str, stored_hash: str) -> bool:
 
 
 class DatabaseManager:
-    def __init__(self, db_path: Path = DB_PATH):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[Any] = None):
+        if db_path is None:
+            self.db_path = DB_PATH
+        else:
+            self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
@@ -89,7 +93,7 @@ class DatabaseManager:
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 author TEXT NOT NULL,
-                cover TEXT NOT NULL,
+                cover TEXT DEFAULT '',
                 description TEXT DEFAULT '',
                 url TEXT DEFAULT '',
                 language TEXT DEFAULT 'vi',
@@ -173,6 +177,9 @@ class DatabaseManager:
                 completed_chapters INTEGER DEFAULT 0,
                 current_chapter_title TEXT DEFAULT '',
                 current_chapter_percent INTEGER DEFAULT 0,
+                current_phase TEXT DEFAULT 'queued',
+                translation_percent INTEGER DEFAULT 0,
+                tts_percent INTEGER DEFAULT 0,
                 status TEXT NOT NULL,
                 can_pause INTEGER DEFAULT 1,
                 error TEXT,
@@ -181,14 +188,95 @@ class DatabaseManager:
                 updated_at REAL NOT NULL
             );
 
+            -- 8. Bảng bản dịch chương truyện (Translations)
+            CREATE TABLE IF NOT EXISTS translations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                story_id TEXT NOT NULL,
+                chapter_id INTEGER NOT NULL,
+                source_language TEXT NOT NULL,
+                target_language TEXT NOT NULL DEFAULT 'vi',
+                source_text_hash TEXT NOT NULL,
+                original_text TEXT NOT NULL,
+                translated_text TEXT NOT NULL,
+                provider TEXT NOT NULL DEFAULT 'openai',
+                model TEXT NOT NULL DEFAULT 'default',
+                prompt_version TEXT NOT NULL DEFAULT 'literary_vi_v1',
+                status TEXT NOT NULL DEFAULT 'completed',
+                error_message TEXT,
+                input_chars INTEGER DEFAULT 0,
+                output_chars INTEGER DEFAULT 0,
+                latency_ms REAL DEFAULT 0.0,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+
+            -- 9. Bảng ngữ cảnh dịch truyện & Character Bible (Translation Contexts)
+            CREATE TABLE IF NOT EXISTS translation_contexts (
+                story_id TEXT PRIMARY KEY,
+                genre TEXT DEFAULT '',
+                character_bible_json TEXT DEFAULT '{}',
+                relationship_map_json TEXT DEFAULT '{}',
+                style_bible_json TEXT DEFAULT '{}',
+                updated_at REAL NOT NULL
+            );
+
+            -- 10. Bảng thuật ngữ truyện (Translation Glossaries)
+            CREATE TABLE IF NOT EXISTS translation_glossaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                story_id TEXT NOT NULL,
+                source_term TEXT NOT NULL,
+                target_term TEXT NOT NULL,
+                notes TEXT DEFAULT '',
+                created_at REAL NOT NULL,
+                UNIQUE(story_id, source_term)
+            );
+
             -- Chỉ mục tối ưu truy vấn
             CREATE INDEX IF NOT EXISTS idx_chapters_story_id ON chapters(story_id);
             CREATE INDEX IF NOT EXISTS idx_user_library_user ON user_library(username);
             CREATE INDEX IF NOT EXISTS idx_read_hist_user ON read_history(username, timestamp DESC);
             CREATE INDEX IF NOT EXISTS idx_listen_hist_user ON listen_history(username, timestamp DESC);
             CREATE INDEX IF NOT EXISTS idx_tasks_device ON tasks(device_id, story_id);
+            CREATE INDEX IF NOT EXISTS idx_trans_hash ON translations(source_text_hash, source_language, target_language, model, prompt_version);
+            CREATE INDEX IF NOT EXISTS idx_trans_story_chap ON translations(story_id, chapter_id);
+            CREATE INDEX IF NOT EXISTS idx_glossaries_story ON translation_glossaries(story_id);
             """)
-        logger.info("Cơ sở dữ liệu SQLite đã được khởi tạo thành công tại: %s", self.db_path)
+
+            # Tự động nâng cấp (migration) thêm cột mới cho cơ sở dữ liệu cũ nếu chưa có
+            self._migrate_columns(conn)
+        logger.info("Cơ sở dữ liệu SQLite đã được khởi tạo và đồng bộ schema thành công tại: %s", self.db_path)
+
+    def _migrate_columns(self, conn: sqlite3.Connection):
+        """Kiểm tra và thêm cột còn thiếu cho database SQLite cũ an toàn không mất dữ liệu"""
+        cursor = conn.cursor()
+        
+        # 1. Bảng stories
+        cursor.execute("PRAGMA table_info(stories)")
+        story_cols = {col["name"] for col in cursor.fetchall()}
+        if "detected_language" not in story_cols:
+            cursor.execute("ALTER TABLE stories ADD COLUMN detected_language TEXT DEFAULT NULL")
+        if "language_confidence" not in story_cols:
+            cursor.execute("ALTER TABLE stories ADD COLUMN language_confidence REAL DEFAULT NULL")
+
+        # 2. Bảng chapters
+        cursor.execute("PRAGMA table_info(chapters)")
+        chap_cols = {col["name"] for col in cursor.fetchall()}
+        if "detected_language" not in chap_cols:
+            cursor.execute("ALTER TABLE chapters ADD COLUMN detected_language TEXT DEFAULT NULL")
+        if "is_translated" not in chap_cols:
+            cursor.execute("ALTER TABLE chapters ADD COLUMN is_translated INTEGER DEFAULT 0")
+        if "translated_title" not in chap_cols:
+            cursor.execute("ALTER TABLE chapters ADD COLUMN translated_title TEXT DEFAULT NULL")
+
+        # 3. Bảng tasks
+        cursor.execute("PRAGMA table_info(tasks)")
+        task_cols = {col["name"] for col in cursor.fetchall()}
+        if "current_phase" not in task_cols:
+            cursor.execute("ALTER TABLE tasks ADD COLUMN current_phase TEXT DEFAULT 'queued'")
+        if "translation_percent" not in task_cols:
+            cursor.execute("ALTER TABLE tasks ADD COLUMN translation_percent INTEGER DEFAULT 0")
+        if "tts_percent" not in task_cols:
+            cursor.execute("ALTER TABLE tasks ADD COLUMN tts_percent INTEGER DEFAULT 0")
 
     # ----------------- TỰ ĐỘNG DI TRÚ TỪ DỮ LIỆU JSON CŨ -----------------
 
@@ -379,11 +467,16 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
-                INSERT OR REPLACE INTO stories (id, title, author, cover, description, url, language, num_parts, is_custom, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM stories WHERE id = ?), ?), ?)
+                INSERT OR REPLACE INTO stories (
+                    id, title, author, cover, description, url, language,
+                    detected_language, language_confidence,
+                    num_parts, is_custom, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM stories WHERE id = ?), ?), ?)
             """, (
-                sid, story.title, story.author, story.cover, story.description,
-                story.url, str(story.language or "vi"), story.numParts, is_custom,
+                sid, story.title or "Untitled", story.author or "Unknown", story.cover or "", story.description or "",
+                story.url or "", str(story.language or "vi"),
+                story.detected_language, story.language_confidence,
+                story.numParts or len(story.parts), is_custom,
                 sid, now, now
             ))
 
@@ -393,14 +486,18 @@ class DatabaseManager:
                     INSERT OR REPLACE INTO chapters (
                         composite_id, story_id, chapter_id, chapter_index,
                         title, url, length, create_date, is_converted,
-                        audio_url, audio_duration, audio_size_bytes, audio_voice, audio_engine
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        audio_url, audio_duration, audio_size_bytes, audio_voice, audio_engine,
+                        detected_language, is_translated, translated_title
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     comp_id, sid, p.id, idx,
                     p.title, p.url, p.length or 0, p.createDate,
                     1 if p.is_converted else 0, p.audio_url,
                     p.audio_duration or 0.0, p.audio_size_bytes or 0,
-                    p.audio_voice, p.audio_engine
+                    p.audio_voice, p.audio_engine,
+                    p.detected_language,
+                    1 if p.is_translated else 0,
+                    p.translated_title
                 ))
 
     def get_story(self, story_id: str) -> Optional[StoryInfo]:
@@ -428,7 +525,10 @@ class DatabaseManager:
                     audio_duration=c["audio_duration"],
                     audio_size_bytes=c["audio_size_bytes"],
                     audio_voice=c["audio_voice"],
-                    audio_engine=c["audio_engine"]
+                    audio_engine=c["audio_engine"],
+                    detected_language=c["detected_language"] if "detected_language" in c.keys() else None,
+                    is_translated=bool(c["is_translated"]) if "is_translated" in c.keys() else False,
+                    translated_title=c["translated_title"] if "translated_title" in c.keys() else None
                 ))
 
             return StoryInfo(
@@ -439,6 +539,8 @@ class DatabaseManager:
                 description=srow["description"] or "",
                 url=srow["url"] or "",
                 language=srow["language"] or "vi",
+                detected_language=srow["detected_language"] if "detected_language" in srow.keys() else None,
+                language_confidence=srow["language_confidence"] if "language_confidence" in srow.keys() else None,
                 numParts=srow["num_parts"] or len(parts),
                 parts=parts
             )
@@ -700,12 +802,17 @@ class DatabaseManager:
                 INSERT OR REPLACE INTO tasks (
                     task_id, story_id, user_id, device_id, total_chapters,
                     completed_chapters, current_chapter_title, current_chapter_percent,
+                    current_phase, translation_percent, tts_percent,
                     status, can_pause, error, resumed, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM tasks WHERE task_id = ?), ?), ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM tasks WHERE task_id = ?), ?), ?)
             """, (
                 task.task_id, task.story_id, task.user_id, task.device_id,
                 task.total_chapters, task.completed_chapters, task.current_chapter_title,
-                task.current_chapter_percent, task.status, 1 if task.can_pause else 0,
+                task.current_chapter_percent,
+                getattr(task, "current_phase", "queued"),
+                getattr(task, "translation_percent", 0),
+                getattr(task, "tts_percent", 0),
+                task.status, 1 if task.can_pause else 0,
                 task.error, 1 if getattr(task, "resumed", False) else 0,
                 task.task_id, now, now
             ))
@@ -724,6 +831,9 @@ class DatabaseManager:
                 completed_chapters=row["completed_chapters"],
                 current_chapter_title=row["current_chapter_title"] or "",
                 current_chapter_percent=row["current_chapter_percent"] or 0,
+                current_phase=row["current_phase"] if "current_phase" in row.keys() else "queued",
+                translation_percent=row["translation_percent"] if "translation_percent" in row.keys() else 0,
+                tts_percent=row["tts_percent"] if "tts_percent" in row.keys() else 0,
                 status=row["status"],
                 can_pause=bool(row["can_pause"]),
                 error=row["error"],
@@ -760,6 +870,9 @@ class DatabaseManager:
                 completed_chapters=row["completed_chapters"],
                 current_chapter_title=row["current_chapter_title"] or "",
                 current_chapter_percent=row["current_chapter_percent"] or 0,
+                current_phase=row["current_phase"] if "current_phase" in row.keys() else "queued",
+                translation_percent=row["translation_percent"] if "translation_percent" in row.keys() else 0,
+                tts_percent=row["tts_percent"] if "tts_percent" in row.keys() else 0,
                 status=row["status"],
                 can_pause=bool(row["can_pause"]),
                 error=row["error"],
@@ -776,3 +889,194 @@ class DatabaseManager:
                 SET status = ?, error = COALESCE(?, error), updated_at = ?
                 WHERE task_id = ?
             """, (status, error, now, task_id))
+
+    # ----------------- REPOSITORY: BẢN DỊCH (TRANSLATIONS & CONTEXT) -----------------
+
+    def save_translation(self, record: TranslationRecord) -> int:
+        """Lưu hoặc cập nhật một bản ghi dịch thuật chương truyện vào SQLite"""
+        now = time.time()
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO translations (
+                    story_id, chapter_id, source_language, target_language,
+                    source_text_hash, original_text, translated_text,
+                    provider, model, prompt_version, status, error_message,
+                    input_chars, output_chars, latency_ms, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                record.story_id, record.chapter_id, record.source_language, record.target_language,
+                record.source_text_hash, record.original_text, record.translated_text,
+                record.provider, record.model, record.prompt_version, record.status, record.error_message,
+                record.input_chars, record.output_chars, record.latency_ms,
+                record.created_at or now, now
+            ))
+            record_id = cur.lastrowid
+
+            # Đánh dấu chapter đã được dịch
+            comp_id = f"{record.story_id}_{record.chapter_id}"
+            cur.execute("""
+                UPDATE chapters
+                SET is_translated = 1,
+                    detected_language = ?
+                WHERE composite_id = ?
+            """, (record.source_language, comp_id))
+
+            return record_id
+
+    def get_translation_by_hash(
+        self,
+        source_text_hash: str,
+        source_language: str = "en",
+        target_language: str = "vi",
+        model: str = "default",
+        prompt_version: str = "literary_vi_v1"
+    ) -> Optional[TranslationRecord]:
+        """Tìm bản dịch đã lưu theo hash của văn bản gốc và phiên bản prompt/model"""
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT * FROM translations
+                WHERE source_text_hash = ?
+                  AND source_language = ?
+                  AND target_language = ?
+                  AND model = ?
+                  AND prompt_version = ?
+                  AND status = 'completed'
+                ORDER BY updated_at DESC LIMIT 1
+            """, (source_text_hash, source_language, target_language, model, prompt_version))
+            row = cur.fetchone()
+            if not row:
+                return None
+            return TranslationRecord(
+                id=row["id"],
+                story_id=row["story_id"],
+                chapter_id=row["chapter_id"],
+                source_language=row["source_language"],
+                target_language=row["target_language"],
+                source_text_hash=row["source_text_hash"],
+                original_text=row["original_text"],
+                translated_text=row["translated_text"],
+                provider=row["provider"],
+                model=row["model"],
+                prompt_version=row["prompt_version"],
+                status=row["status"],
+                error_message=row["error_message"],
+                input_chars=row["input_chars"] or 0,
+                output_chars=row["output_chars"] or 0,
+                latency_ms=row["latency_ms"] or 0.0,
+                created_at=row["created_at"],
+                updated_at=row["updated_at"]
+            )
+
+    def get_chapter_translation(self, story_id: str, chapter_id: int) -> Optional[TranslationRecord]:
+        """Lấy bản dịch mới nhất của một chương cụ thể"""
+        sid = str(story_id)
+        cid = int(chapter_id)
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT * FROM translations
+                WHERE story_id = ? AND chapter_id = ? AND status = 'completed'
+                ORDER BY updated_at DESC LIMIT 1
+            """, (sid, cid))
+            row = cur.fetchone()
+            if not row:
+                return None
+            return TranslationRecord(
+                id=row["id"],
+                story_id=row["story_id"],
+                chapter_id=row["chapter_id"],
+                source_language=row["source_language"],
+                target_language=row["target_language"],
+                source_text_hash=row["source_text_hash"],
+                original_text=row["original_text"],
+                translated_text=row["translated_text"],
+                provider=row["provider"],
+                model=row["model"],
+                prompt_version=row["prompt_version"],
+                status=row["status"],
+                error_message=row["error_message"],
+                input_chars=row["input_chars"] or 0,
+                output_chars=row["output_chars"] or 0,
+                latency_ms=row["latency_ms"] or 0.0,
+                created_at=row["created_at"],
+                updated_at=row["updated_at"]
+            )
+
+    def get_translation_context(self, story_id: str) -> Optional[Dict[str, Any]]:
+        """Lấy thông tin ngữ cảnh dịch truyện (Character Bible, Relationship Map, Style)"""
+        sid = str(story_id)
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM translation_contexts WHERE story_id = ?", (sid,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            return {
+                "story_id": row["story_id"],
+                "genre": row["genre"] or "",
+                "character_bible": json.loads(row["character_bible_json"] or "{}"),
+                "relationship_map": json.loads(row["relationship_map_json"] or "{}"),
+                "style_bible": json.loads(row["style_bible_json"] or "{}"),
+                "updated_at": row["updated_at"]
+            }
+
+    def save_translation_context(
+        self,
+        story_id: str,
+        genre: str = "",
+        character_bible: Optional[Dict] = None,
+        relationship_map: Optional[Dict] = None,
+        style_bible: Optional[Dict] = None
+    ):
+        """Lưu hoặc cập nhật ngữ cảnh dịch thuật của tác phẩm"""
+        sid = str(story_id)
+        now = time.time()
+        cb_json = json.dumps(character_bible or {}, ensure_ascii=False)
+        rm_json = json.dumps(relationship_map or {}, ensure_ascii=False)
+        sb_json = json.dumps(style_bible or {}, ensure_ascii=False)
+
+        with self.get_connection() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO translation_contexts (
+                    story_id, genre, character_bible_json, relationship_map_json, style_bible_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            """, (sid, genre, cb_json, rm_json, sb_json, now))
+
+    def get_glossary(self, story_id: str) -> List[Dict[str, Any]]:
+        """Lấy danh sách thuật ngữ đã chuẩn hóa của tác phẩm"""
+        sid = str(story_id)
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT source_term, target_term, notes
+                FROM translation_glossaries
+                WHERE story_id = ?
+                ORDER BY source_term ASC
+            """, (sid,))
+            return [dict(r) for r in cur.fetchall()]
+
+    def add_glossary_item(self, story_id: str, source_term: str, target_term: str, notes: str = "") -> List[Dict[str, Any]]:
+        """Thêm hoặc cập nhật một mục thuật ngữ vào bảng glossary"""
+        sid = str(story_id)
+        now = time.time()
+        with self.get_connection() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO translation_glossaries (story_id, source_term, target_term, notes, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (sid, source_term.strip(), target_term.strip(), notes.strip(), now))
+        return self.get_glossary(sid)
+
+    def delete_glossary_item(self, story_id: str, source_term: str) -> List[Dict[str, Any]]:
+        """Xóa một mục thuật ngữ khỏi glossary"""
+        sid = str(story_id)
+        with self.get_connection() as conn:
+            conn.execute("""
+                DELETE FROM translation_glossaries
+                WHERE story_id = ? AND source_term = ?
+            """, (sid, source_term.strip()))
+        return self.get_glossary(sid)
+
+# Module alias for tests and backward compatibility
+Database = DatabaseManager

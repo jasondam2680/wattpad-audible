@@ -22,14 +22,16 @@ def make_content_disposition(filename: str) -> str:
     return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
 
 from .models import (
-    StoryInfo, ChapterInfo, VoiceConfig,
+    StoryInfo, ChapterInfo, VoiceConfig, TranslationConfig,
     ConvertRequest, CustomStoryRequest, SampleVoiceRequest,
+    TranslationPreviewRequest, TranslationPreviewResponse,
     LoginRequest, LoginResponse, UserProfile,
     UserLibraryStory, ReadingHistoryItem, ListeningHistoryItem
 )
 from .database import DatabaseManager
 from .scraper import WattpadScraper
 from .tts_engine import TTSEngine, AUDIO_DIR, SAMPLE_DIR
+from .translation import TranslationService
 from .tasks import TaskManager
 from .auth import UserManager
 
@@ -37,9 +39,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="Wattpad AI Audiobook API",
-    description="Chuyển đổi truyện Wattpad thành sách nói với giọng đọc và biểu cảm AI",
-    version="1.9.0"
+    title="Wattpad AI Audiobook & Translation API",
+    description="Chuyển đổi truyện Wattpad thành sách nói với dịch thuật văn học AI và biểu cảm thông minh",
+    version="2.0.0"
 )
 
 # Kích hoạt CORS để frontend hoặc Android app kết nối thoải mái
@@ -55,7 +57,8 @@ app.add_middleware(
 db = DatabaseManager()
 scraper = WattpadScraper()
 tts = TTSEngine()
-task_manager = TaskManager(tts, scraper, db)
+translation_service = TranslationService(db)
+task_manager = TaskManager(tts, scraper, db, translation_service)
 user_manager = UserManager(db)
 
 # Thư mục frontend và static
@@ -245,7 +248,7 @@ async def get_voices():
 
 @app.post("/api/story/parse")
 async def parse_story(req: ParseRequest):
-    """Phân tích đường link Wattpad và trả về danh sách chương, ảnh bìa, tác giả"""
+    """Phân tích đường link Wattpad và trả về danh sách chương, ảnh bìa, tác giả, tự động nhận diện ngôn ngữ"""
     url = req.url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="Vui lòng nhập đường link hoặc ID truyện Wattpad.")
@@ -257,7 +260,15 @@ async def parse_story(req: ParseRequest):
             detail="Không thể lấy thông tin truyện từ Wattpad. Vui lòng kiểm tra lại đường link hoặc thử dùng tính năng Nhập văn bản thủ công."
         )
 
-    # Kiểm tra xem các chương đã từng được chuyển đổi trước đó chưa
+    # Tự động nhận diện ngôn ngữ của truyện từ mô tả / tiêu đề / metadata
+    det_res = translation_service.detect_language(
+        f"{story.title}\n{story.description}",
+        metadata_lang=str(story.language or "")
+    )
+    story.detected_language = det_res.source_language
+    story.language_confidence = det_res.confidence
+
+    # Kiểm tra xem các chương đã từng được chuyển đổi hoặc dịch trước đó chưa
     existing_story = task_manager.load_story(story.id)
     cached_part_map = {p.id: p for p in existing_story.parts} if existing_story else {}
 
@@ -272,6 +283,14 @@ async def parse_story(req: ParseRequest):
             p.audio_voice = (meta.get("voice") if meta else None) or (cached_p.audio_voice if cached_p else None) or "Thái Sơn"
             p.audio_engine = (meta.get("engine") if meta else None) or (cached_p.audio_engine if cached_p else None) or "vieneu"
 
+        # Kiểm tra bản dịch đã có trong database
+        trans = db.get_chapter_translation(story.id, p.id)
+        if trans:
+            p.is_translated = True
+            p.detected_language = trans.source_language
+        else:
+            p.detected_language = story.detected_language
+
     task_manager.save_story(story)
     return story
 
@@ -281,24 +300,39 @@ async def create_custom_story(req: CustomStoryRequest):
     """Tạo truyện từ nội dung văn bản tự nhập (Tính năng dự phòng khi Wattpad chặn IP)"""
     import uuid
     story_id = f"custom_{str(uuid.uuid4())[:8]}"
+    chapters_list = req.chapters if req.chapters else []
+    if not chapters_list and req.text:
+        chapters_list = [{"title": "Chương 1", "content": req.text}]
+
     parts = []
-    
-    for idx, chap in enumerate(req.chapters):
+    combined_sample = ""
+    for idx, chap in enumerate(chapters_list):
         cid = 1000 + idx
+        content = chap.get("content", "")
+        if idx == 0:
+            combined_sample = content[:500]
         parts.append(ChapterInfo(
             id=cid,
             title=chap.get("title", f"Chương {idx+1}"),
             url="",
-            length=len(chap.get("content", ""))
+            length=len(content)
         ))
+
+    det_res = translation_service.detect_language(
+        combined_sample or req.title,
+        metadata_lang=req.language
+    )
 
     story = StoryInfo(
         id=story_id,
         title=req.title,
         author=req.author,
         cover=req.cover or "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&q=80",
-        description="Truyện được nhập trực tiếp bởi người dùng.",
+        description=req.description or "Truyện được nhập trực tiếp bởi người dùng.",
         url="",
+        language=det_res.source_language,
+        detected_language=det_res.source_language,
+        language_confidence=det_res.confidence,
         numParts=len(parts),
         parts=parts
     )
@@ -309,7 +343,7 @@ async def create_custom_story(req: CustomStoryRequest):
     # Lưu nội dung text từng chương vào file text tạm
     custom_text_dir = Path(__file__).parent / "data" / "custom_texts" / story_id
     custom_text_dir.mkdir(parents=True, exist_ok=True)
-    for idx, chap in enumerate(req.chapters):
+    for idx, chap in enumerate(chapters_list):
         cid = 1000 + idx
         with open(custom_text_dir / f"{cid}.txt", "w", encoding="utf-8") as f:
             f.write(chap.get("content", ""))
@@ -338,12 +372,17 @@ async def get_story(story_id: str):
                 meta = tts.get_audio_metadata(story.id, p.id)
                 p.audio_voice = (meta.get("voice") if meta else None) or "Thái Sơn"
                 p.audio_engine = (meta.get("engine") if meta else None) or "vieneu"
+        
+        trans = db.get_chapter_translation(story.id, p.id)
+        if trans:
+            p.is_translated = True
+            p.detected_language = trans.source_language
     return story
 
 
 @app.get("/api/story/{story_id}/chapter/{chapter_id}")
 async def get_chapter_content(story_id: str, chapter_id: int):
-    """Lấy nội dung văn bản của một chương kèm metadata điều hướng"""
+    """Lấy nội dung văn bản của một chương kèm metadata song ngữ và điều hướng"""
     safe_story_id = re.sub(r'[^a-zA-Z0-9_-]', '', str(story_id))
     if not safe_story_id:
         raise HTTPException(status_code=400, detail="Mã truyện không hợp lệ.")
@@ -384,9 +423,20 @@ async def get_chapter_content(story_id: str, chapter_id: int):
     custom_file = Path(__file__).parent / "data" / "custom_texts" / safe_story_id / f"{safe_chapter_id}.txt"
     if custom_file.exists():
         with open(custom_file, "r", encoding="utf-8") as f:
-            text = f.read()
+            raw_text = f.read()
     else:
-        text = scraper.get_chapter_text(safe_chapter_id)
+        raw_text = scraper.get_chapter_text(safe_chapter_id)
+
+    # Kiểm tra bản dịch đã có trong DB
+    trans = db.get_chapter_translation(safe_story_id, safe_chapter_id)
+    translated_text = trans.translated_text if trans else None
+
+    # Nhận diện ngôn ngữ
+    det = translation_service.detect_language(
+        raw_text,
+        metadata_lang=story.detected_language if story else None
+    )
+    detected_lang = trans.source_language if trans else det.source_language
 
     return {
         "story_id": safe_story_id,
@@ -400,9 +450,132 @@ async def get_chapter_content(story_id: str, chapter_id: int):
         "prev_chapter_id": prev_chapter_id,
         "next_chapter_id": next_chapter_id,
         "parts": all_parts,
-        "text": text
+        "text": translated_text if translated_text else raw_text,
+        "original_text": raw_text,
+        "translated_text": translated_text,
+        "detected_language": detected_lang,
+        "is_translated": bool(trans),
+        "translation_info": {
+            "provider": trans.provider,
+            "model": trans.model,
+            "prompt_version": trans.prompt_version,
+            "latency_ms": trans.latency_ms
+        } if trans else None
     }
 
+
+# ----------------- CÁC ENDPOINT API: DỊCH THUẬT & NGÔN NGỮ -----------------
+
+@app.get("/api/languages")
+async def get_supported_languages():
+    """Lấy danh sách các ngôn ngữ được hỗ trợ và các tùy chọn dịch"""
+    return {
+        "languages": [
+            {"code": "auto", "name": "Tự động nhận diện (Auto Detect)"},
+            {"code": "en", "name": "Tiếng Anh (English)"},
+            {"code": "vi", "name": "Tiếng Việt (Vietnamese)"}
+        ],
+        "source_languages": [
+            {"code": "auto", "name": "Tự động nhận diện (Auto Detect)"},
+            {"code": "en", "name": "Tiếng Anh (English)"},
+            {"code": "vi", "name": "Tiếng Việt (Vietnamese)"}
+        ],
+        "target_languages": [
+            {"code": "vi", "name": "Tiếng Việt (Vietnamese - Sách nói chuẩn)"}
+        ],
+        "models": [
+            {"id": "gpt-4o-mini", "name": "OpenAI GPT-4o-mini (Mặc định)"},
+            {"id": "mock", "name": "Mock Provider (Testing)"}
+        ],
+        "prompt_versions": [
+            {"id": "literary_vi_v1", "name": "Bản dịch Văn học V1 (Tối ưu Sách nói / 22 Điều khoản)", "is_default": True}
+        ]
+    }
+
+
+@app.post("/api/translation/preview", response_model=TranslationPreviewResponse)
+async def preview_translation(req: TranslationPreviewRequest):
+    """Dịch thử một đoạn văn mẫu trước khi bắt đầu tạo sách nói"""
+    if not req.text or not req.text.strip():
+        raise HTTPException(status_code=400, detail="Vui lòng nhập đoạn văn bản cần dịch thử.")
+
+    try:
+        res = await translation_service.translate_text(
+            text=req.text,
+            source_language=req.source_language or "auto",
+            target_language=req.target_language or "vi",
+            story_id=req.story_id,
+            chapter_id=req.chapter_id,
+            prompt_version=req.prompt_version or "literary_vi_v1"
+        )
+        return TranslationPreviewResponse(
+            success=True,
+            source_language=res.source_language,
+            target_language=res.target_language,
+            original_text=req.text,
+            translated_text=res.translated_text,
+            cached=res.cached,
+            provider=res.provider,
+            model=res.model,
+            prompt_version=res.prompt_version,
+            latency_ms=res.latency_ms
+        )
+    except Exception as e:
+        logger.exception(f"Lỗi khi dịch thử: {e}")
+        return TranslationPreviewResponse(
+            success=False,
+            source_language=req.source_language or "unknown",
+            target_language=req.target_language or "vi",
+            original_text=req.text,
+            translated_text="",
+            cached=False,
+            provider="error",
+            model="none",
+            prompt_version=req.prompt_version or "literary_vi_v1",
+            error=str(e)
+        )
+
+
+@app.get("/api/story/{story_id}/chapter/{chapter_id}/translation")
+async def get_chapter_translation_record(story_id: str, chapter_id: int):
+    """Lấy chi tiết bản ghi dịch thuật của một chương"""
+    safe_sid = re.sub(r'[^a-zA-Z0-9_-]', '', str(story_id))
+    safe_cid = int(chapter_id)
+    trans = db.get_chapter_translation(safe_sid, safe_cid)
+    if not trans:
+        raise HTTPException(status_code=404, detail="Chương này chưa có bản dịch trong hệ thống.")
+    return trans
+
+
+@app.get("/api/story/{story_id}/glossary")
+async def get_story_glossary(story_id: str):
+    """Lấy danh sách thuật ngữ chuyên biệt của truyện"""
+    safe_sid = re.sub(r'[^a-zA-Z0-9_-]', '', str(story_id))
+    return {"glossary": db.get_glossary(safe_sid)}
+
+
+class GlossaryItemRequest(BaseModel):
+    source_term: str
+    target_term: str
+    notes: Optional[str] = ""
+
+@app.post("/api/story/{story_id}/glossary")
+async def add_story_glossary_term(story_id: str, item: GlossaryItemRequest):
+    """Thêm hoặc cập nhật thuật ngữ dịch cho truyện"""
+    safe_sid = re.sub(r'[^a-zA-Z0-9_-]', '', str(story_id))
+    updated = db.add_glossary_item(safe_sid, item.source_term, item.target_term, item.notes or "")
+    return {"success": True, "glossary": updated}
+
+
+@app.delete("/api/story/{story_id}/glossary/{source_term}")
+async def delete_story_glossary_term(story_id: str, source_term: str):
+    """Xóa thuật ngữ khỏi glossary của truyện"""
+    safe_sid = re.sub(r'[^a-zA-Z0-9_-]', '', str(story_id))
+    updated = db.delete_glossary_item(safe_sid, source_term)
+    return {"success": True, "glossary": updated}
+
+
+# ----------------- CÁC ENDPOINT API: TTS & TIẾN TRÌNH CHUYỂN ĐỔI -----------------
 
 @app.post("/api/tts/sample")
 async def generate_voice_sample(req: SampleVoiceRequest):
@@ -433,6 +606,7 @@ async def start_conversion(req: ConvertRequest):
         story_id=safe_story_id,
         chapter_ids=req.chapter_ids,
         voice_config=req.voice_config,
+        translation_config=req.translation_config,
         device_id=req.device_id,
         user_id=req.user_id
     )
@@ -444,6 +618,7 @@ async def start_conversion(req: ConvertRequest):
         "task_id": task_id,
         "resumed": is_resumed,
         "status": task.status if task else "processing",
+        "current_phase": getattr(task, "current_phase", "queued") if task else "queued",
         "message": msg
     }
 

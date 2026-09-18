@@ -9,6 +9,10 @@ venv/
 env/
 ENV/
 .venv/
+.env
+.env.local
+.env.*.local
+
 build/
 develop-eggs/
 dist/

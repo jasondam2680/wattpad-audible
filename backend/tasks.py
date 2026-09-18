@@ -6,10 +6,11 @@ import zipfile
 import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from .models import TaskProgress, VoiceConfig, StoryInfo, ChapterInfo
+from .models import TaskProgress, VoiceConfig, StoryInfo, ChapterInfo, TranslationConfig
 from .tts_engine import TTSEngine, AUDIO_DIR
 from .scraper import WattpadScraper
 from .database import DatabaseManager
+from .translation import TranslationService, TranslationError
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +21,17 @@ ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 class TaskManager:
     def __init__(
         self,
-        tts_engine: TTSEngine,
-        scraper: WattpadScraper,
-        db: Optional[DatabaseManager] = None
+        tts_engine: Optional[TTSEngine] = None,
+        scraper: Optional[WattpadScraper] = None,
+        db: Optional[DatabaseManager] = None,
+        translation_service: Optional[TranslationService] = None,
+        **kwargs
     ):
-        self.tts = tts_engine
-        self.scraper = scraper
+        self.tts = tts_engine if tts_engine is not None else TTSEngine()
+        self.scraper = scraper if scraper is not None else WattpadScraper()
         self.db = db if db is not None else DatabaseManager()
+        self.translation = translation_service if translation_service is not None else TranslationService(self.db)
+        self.translation_service = self.translation
         self.tasks: Dict[str, TaskProgress] = {}
         self.pause_events: Dict[str, asyncio.Event] = {}
         self.cancel_flags: Dict[str, bool] = {}
@@ -80,6 +85,10 @@ class TaskManager:
             self.tasks[task_id] = task
         return task
 
+    def get_task_progress(self, task_id: str) -> Optional[TaskProgress]:
+        """Alias cho get_task"""
+        return self.get_task(task_id)
+
     def get_active_task_for_device(self, device_id: str, story_id: Optional[str] = None) -> Optional[TaskProgress]:
         """Tìm tác vụ đang thực thi hoặc tạm dừng của thiết bị đầu cuối"""
         if not device_id:
@@ -103,6 +112,7 @@ class TaskManager:
         if not task or task.status != "processing":
             return False
         task.status = "paused"
+        task.current_phase = "paused"
         if task_id in self.pause_events:
             self.pause_events[task_id].clear()
         self._save_task_state(task)
@@ -115,6 +125,7 @@ class TaskManager:
         if not task or task.status != "paused":
             return False
         task.status = "processing"
+        task.current_phase = "synthesizing"
         if task_id in self.pause_events:
             self.pause_events[task_id].set()
         self._save_task_state(task)
@@ -127,6 +138,7 @@ class TaskManager:
         if not task or task.status in ["completed", "failed", "cancelled"]:
             return False
         task.status = "cancelled"
+        task.current_phase = "cancelled"
         self.cancel_flags[task_id] = True
         if task_id in self.pause_events:
             self.pause_events[task_id].set()
@@ -145,12 +157,12 @@ class TaskManager:
         story_id: str,
         chapter_ids: List[int],
         voice_config: VoiceConfig,
+        translation_config: Optional[TranslationConfig] = None,
         device_id: Optional[str] = None,
         user_id: Optional[str] = None
     ) -> str:
         """
-        Bắt đầu hoặc tiếp nối phiên chuyển đổi sách nói.
-        Tự động nhận diện các chương đã có MP3 để bỏ qua và tiếp tục các chương còn thiếu.
+        Bắt đầu hoặc tiếp nối phiên chuyển đổi sách nói và tự động dịch AI nếu cần.
         """
         safe_sid = re.sub(r'[^a-zA-Z0-9_-]', '', str(story_id))
         dev_key = f"{device_id}_{safe_sid}" if device_id else None
@@ -187,6 +199,7 @@ class TaskManager:
             completed_chapters=already_completed,
             current_chapter_title="Hoàn tất chuyển đổi tất cả các chương!" if is_all_done else ("Tiếp tục phiên chuyển đổi..." if already_completed > 0 else "Đang khởi tạo..."),
             current_chapter_percent=100 if is_all_done else 0,
+            current_phase="completed" if is_all_done else "queued",
             status="completed" if is_all_done else "queued",
             can_pause=True,
             device_id=device_id,
@@ -208,7 +221,14 @@ class TaskManager:
         self.cancel_flags[task_id] = False
 
         # Khởi chạy tác vụ nền tiếp tục chuyển đổi các chương còn thiếu
-        asyncio.create_task(self._process_conversion(task_id, safe_sid, chapter_ids, voice_config, dev_key))
+        asyncio.create_task(self._process_conversion(
+            task_id=task_id,
+            story_id=safe_sid,
+            chapter_ids=chapter_ids,
+            voice_config=voice_config,
+            translation_config=translation_config,
+            dev_key=dev_key
+        ))
         return task_id
 
     async def _process_conversion(
@@ -217,6 +237,7 @@ class TaskManager:
         story_id: str,
         chapter_ids: List[int],
         voice_config: VoiceConfig,
+        translation_config: Optional[TranslationConfig] = None,
         dev_key: Optional[str] = None
     ):
         task = self.get_task(task_id)
@@ -225,11 +246,13 @@ class TaskManager:
 
         async with self.concurrency_semaphore:
             task.status = "processing"
+            task.current_phase = "scraping"
             self._save_task_state(task)
 
             story = self.load_story(story_id)
             if not story:
                 task.status = "failed"
+                task.current_phase = "failed"
                 task.error = f"Không tìm thấy dữ liệu truyện {story_id}"
                 self._save_task_state(task)
                 if dev_key:
@@ -249,9 +272,6 @@ class TaskManager:
                         raise asyncio.CancelledError("Tác vụ đã bị hủy bởi người dùng.")
 
             try:
-                # Tối ưu hóa mức độ song song của các chương:
-                # - Edge-TTS: cloud API (network I/O), chạy 4-6 chương cùng lúc để đạt tốc độ cao nhất
-                # - VieNeu-TTS: CPU ONNX, chạy 1 chương trên 2-core, 2 chương trên 4-core, 4 chương trên 8-core
                 cpu_cores = os.cpu_count() or 2
                 if voice_config.engine == "edge-tts":
                     chap_concurrency = int(os.environ.get("EDGE_TTS_CONCURRENCY", "4"))
@@ -260,7 +280,7 @@ class TaskManager:
 
                 chap_semaphore = asyncio.Semaphore(chap_concurrency)
                 task_lock = asyncio.Lock()
-                logger.info(f"Khởi chạy chuyển đổi task {task_id} với mức song song {chap_concurrency} chương đồng thời ({voice_config.engine}).")
+                logger.info(f"Khởi chạy chuyển đổi task {task_id} với mức song song {chap_concurrency} chương ({voice_config.engine}).")
 
                 async def process_single_chapter(cid: int):
                     async with chap_semaphore:
@@ -288,41 +308,100 @@ class TaskManager:
 
                         async with task_lock:
                             task.current_chapter_title = chapter_title
+                            task.current_phase = "scraping"
                             self._save_task_state(task)
 
                         # 1. Lấy nội dung chữ của chương
                         logger.info(f"Đang lấy nội dung chương {cid}: {chapter_title}")
-                        text = ""
+                        raw_text = ""
                         custom_file = DATA_DIR / "custom_texts" / story_id / f"{cid}.txt"
                         if custom_file.exists():
                             try:
                                 with open(custom_file, "r", encoding="utf-8") as f:
-                                    text = f.read()
+                                    raw_text = f.read()
                             except Exception as e:
                                 logger.error(f"Lỗi đọc file custom text {custom_file}: {e}")
 
-                        if not text:
+                        if not raw_text:
                             try:
-                                text = await asyncio.to_thread(self.scraper.get_chapter_text, cid)
+                                raw_text = await asyncio.to_thread(self.scraper.get_chapter_text, cid)
                             except Exception as e:
                                 logger.error(f"Lỗi tải text chương {cid}: {e}")
 
-                        if not text:
+                        if not raw_text or not raw_text.strip():
                             logger.warning(f"Chương {cid} không có nội dung chữ, bỏ qua.")
                             async with task_lock:
                                 task.completed_chapters += 1
                                 self._save_task_state(task)
                             return
 
-                        # 2. Callback cập nhật tiến trình %
-                        def on_progress(percent: int):
+                        # 2. Nhận diện ngôn ngữ & Quyết định dịch thuật
+                        det_res = self.translation.detect_language(raw_text, metadata_lang=str(story.language or ""))
+                        src_lang = det_res.source_language
+                        
+                        # Cập nhật detected language vào story và chapter
+                        if chapter_obj:
+                            chapter_obj.detected_language = src_lang
+
+                        # Xác định translation policy
+                        should_translate = False
+                        if src_lang == "vi":
+                            should_translate = False
+                        elif src_lang == "en":
+                            if translation_config is not None:
+                                should_translate = translation_config.enabled and translation_config.target_language == "vi"
+                            else:
+                                # Mặc định tự động dịch nếu tiếng Anh và config không được chỉ định
+                                should_translate = True
+
+                        final_tts_text = raw_text
+
+                        if should_translate:
+                            async with task_lock:
+                                task.current_phase = "translating"
+                                task.current_chapter_title = f"[Đang dịch AI] {chapter_title}"
+                                self._save_task_state(task)
+
+                            def on_translation_progress(percent: int):
+                                task.translation_percent = percent
+
+                            try:
+                                trans_res = await self.translation.translate_chapter(
+                                    story_id=story_id,
+                                    chapter_id=cid,
+                                    text=raw_text,
+                                    config=translation_config,
+                                    progress_callback=on_translation_progress,
+                                    check_pause_cancel=check_pause_cancel
+                                )
+                                final_tts_text = trans_res.translated_text
+                                if chapter_obj:
+                                    chapter_obj.is_translated = True
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as te:
+                                logger.exception(f"Lỗi khi dịch chương {cid}: {te}")
+                                async with task_lock:
+                                    task.status = "failed"
+                                    task.current_phase = "failed"
+                                    task.error = f"Lỗi dịch chương {cid}: {str(te)}"
+                                    self._save_task_state(task)
+                                return
+
+                        # 3. Chuyển đổi Text-to-Speech
+                        async with task_lock:
+                            task.current_phase = "synthesizing"
+                            task.current_chapter_title = f"[Đang đọc AI] {chapter_title}"
+                            self._save_task_state(task)
+
+                        def on_tts_progress(percent: int):
+                            task.tts_percent = percent
                             if chap_concurrency == 1:
                                 task.current_chapter_percent = percent
                             else:
                                 overall = int(((task.completed_chapters + (percent / 100.0)) / max(1, task.total_chapters)) * 100)
                                 task.current_chapter_percent = min(99, overall)
 
-                        # 3. Chuyển đổi TTS
                         try:
                             res = await self.tts.convert_chapter_to_audio(
                                 story_id=story_id,
@@ -330,9 +409,9 @@ class TaskManager:
                                 chapter_title=chapter_title,
                                 story_title=story.title,
                                 story_author=story.author,
-                                text=text,
+                                text=final_tts_text,
                                 config=voice_config,
-                                progress_callback=on_progress,
+                                progress_callback=on_tts_progress,
                                 check_pause_cancel=check_pause_cancel
                             )
                             self.update_chapter_audio_status(
@@ -347,6 +426,12 @@ class TaskManager:
                             raise
                         except Exception as e:
                             logger.exception(f"Lỗi khi chuyển đổi TTS chương {cid}: {e}")
+                            async with task_lock:
+                                task.status = "failed"
+                                task.current_phase = "failed"
+                                task.error = f"Lỗi chuyển đổi âm thanh chương {cid}: {str(e)}"
+                                self._save_task_state(task)
+                            return
 
                         async with task_lock:
                             task.completed_chapters += 1
@@ -357,14 +442,17 @@ class TaskManager:
                 # Thực thi chuyển đổi các chương song song có kiểm soát
                 await asyncio.gather(*(process_single_chapter(cid) for cid in chapter_ids))
 
-                task.status = "completed"
-                task.current_chapter_title = "Hoàn tất chuyển đổi tất cả các chương!"
-                task.current_chapter_percent = 100
-                self._save_task_state(task)
-                logger.info(f"Hoàn thành trọn vẹn task {task_id}")
+                if task.status != "failed":
+                    task.status = "completed"
+                    task.current_phase = "completed"
+                    task.current_chapter_title = "Hoàn tất chuyển đổi tất cả các chương!"
+                    task.current_chapter_percent = 100
+                    self._save_task_state(task)
+                    logger.info(f"Hoàn thành trọn vẹn task {task_id}")
 
             except asyncio.CancelledError:
                 task.status = "cancelled"
+                task.current_phase = "cancelled"
                 task.current_chapter_title = "Đã dừng và hủy bỏ tiến trình."
                 self._save_task_state(task)
                 logger.info(f"Tác vụ {task_id} đã dừng theo yêu cầu của người dùng.")

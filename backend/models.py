@@ -1,10 +1,29 @@
+import time
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
+
+class TranslationConfig(BaseModel):
+    enabled: bool = True
+    source_language: str = "auto"  # "auto" | "en" | "vi"
+    target_language: str = "vi"
+    provider: Optional[str] = None  # None uses system default (e.g. openai or mock)
+    model: Optional[str] = None
+    prompt_version: str = "literary_vi_v1"
+    preserve_names: bool = True
+    audiobook_optimization: bool = True
+
+class LanguageDetectionResult(BaseModel):
+    source_language: str
+    confidence: float
+    detection_method: str  # "metadata", "heuristic", "analysis"
+    is_supported: bool = True
 
 class ChapterInfo(BaseModel):
     id: int
     title: str
-    url: str
+    url: str = ""
+    text: Optional[str] = None
+    language: Optional[str] = None
     length: Optional[int] = 0
     createDate: Optional[str] = None
     is_converted: bool = False
@@ -13,17 +32,26 @@ class ChapterInfo(BaseModel):
     audio_size_bytes: Optional[int] = None
     audio_voice: Optional[str] = None
     audio_engine: Optional[str] = None
+    detected_language: Optional[str] = None
+    is_translated: bool = False
+    translated_title: Optional[str] = None
 
 class StoryInfo(BaseModel):
     id: str
     title: str
-    author: str
-    cover: str
-    description: str
-    url: str
+    author: str = "Tác giả"
+    cover: Optional[str] = None
+    description: str = ""
+    url: str = ""
     language: Optional[Any] = "vi"
-    numParts: int
-    parts: List[ChapterInfo]
+    detected_language: Optional[str] = None
+    language_confidence: Optional[float] = None
+    numParts: Optional[int] = 0
+    parts: List[ChapterInfo] = Field(default_factory=list)
+
+    @property
+    def cover_url(self) -> Optional[str]:
+        return self.cover
 
 class VoiceConfig(BaseModel):
     engine: str = "vieneu" # "vieneu" | "edge-tts"
@@ -38,6 +66,7 @@ class ConvertRequest(BaseModel):
     story_id: str
     chapter_ids: List[int]
     voice_config: VoiceConfig
+    translation_config: Optional[TranslationConfig] = None
     device_id: Optional[str] = None
     user_id: Optional[str] = None
 
@@ -45,8 +74,11 @@ class CustomStoryRequest(BaseModel):
     title: str
     author: str = "Tác giả ẩn danh"
     cover: Optional[str] = None
-    chapters: List[Dict[str, str]] # [{'title': 'Chương 1', 'content': 'Nội dung...'}]
+    description: Optional[str] = None
+    text: Optional[str] = None
+    chapters: List[Dict[str, str]] = Field(default_factory=list) # [{'title': 'Chương 1', 'content': 'Nội dung...'}]
     user_id: Optional[str] = None
+    language: Optional[str] = "auto"
 
 class SampleVoiceRequest(BaseModel):
     text: Optional[str] = "Xin chào, đây là giọng đọc AI của ứng dụng sách nói Wattpad."
@@ -59,12 +91,60 @@ class TaskProgress(BaseModel):
     completed_chapters: int
     current_chapter_title: str
     current_chapter_percent: int
+    current_phase: str = "queued" # "queued", "scraping", "detecting_language", "translating", "synthesizing", "completed", "failed", "cancelled", "paused"
+    translation_percent: int = 0
+    tts_percent: int = 0
     status: str # "queued", "processing", "paused", "completed", "failed", "cancelled"
     can_pause: bool = True
     error: Optional[str] = None
     device_id: Optional[str] = None
     user_id: Optional[str] = None
     resumed: bool = False
+
+class TranslationRecord(BaseModel):
+    id: Optional[int] = None
+    story_id: str
+    chapter_id: int
+    source_language: str
+    target_language: str
+    source_text_hash: str
+    original_text: str
+    translated_text: str
+    provider: str
+    model: str
+    prompt_version: str
+    status: str = "completed" # "pending", "processing", "completed", "failed", "cached"
+    error_message: Optional[str] = None
+    input_chars: int = 0
+    output_chars: int = 0
+    latency_ms: float = 0.0
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+
+    @property
+    def cached(self) -> bool:
+        return True
+
+class TranslationPreviewRequest(BaseModel):
+    text: str
+    source_language: Optional[str] = "auto"
+    target_language: Optional[str] = "vi"
+    story_id: Optional[str] = None
+    chapter_id: Optional[int] = None
+    prompt_version: Optional[str] = "literary_vi_v1"
+
+class TranslationPreviewResponse(BaseModel):
+    success: bool
+    source_language: str
+    target_language: str
+    original_text: str
+    translated_text: str
+    cached: bool = False
+    provider: str
+    model: str
+    prompt_version: str
+    latency_ms: float = 0.0
+    error: Optional[str] = None
 
 # ----------------- CẤU TRÚC XÁC THỰC & NGƯỜI DÙNG -----------------
 

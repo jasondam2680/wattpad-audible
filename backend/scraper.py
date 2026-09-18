@@ -14,10 +14,27 @@ HEADERS = {
     'Accept-Language': 'vi,en-US;q=0.9,en;q=0.8',
 }
 
+from urllib.parse import urlparse
+
 class WattpadScraper:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update(HEADERS)
+
+    @staticmethod
+    def is_valid_wattpad_url(url: str) -> bool:
+        """Kiểm tra URL an toàn, chỉ chấp nhận domain chính thức của Wattpad (Chống SSRF)"""
+        try:
+            parsed = urlparse(url.strip())
+            if parsed.scheme not in ["http", "https"]:
+                return False
+            hostname = parsed.hostname or ""
+            # Chấp nhận wattpad.com và các subdomain của wattpad.com
+            if hostname == "wattpad.com" or hostname.endswith(".wattpad.com"):
+                return True
+            return False
+        except Exception:
+            return False
 
     def extract_story_id(self, url_or_id: str) -> Optional[str]:
         """Trích xuất Story ID hoặc Part ID từ đường link Wattpad"""
@@ -44,10 +61,16 @@ class WattpadScraper:
         url_or_id = url_or_id.strip()
         
         # Xác định URL mục tiêu
-        if url_or_id.startswith('http'):
+        if url_or_id.startswith('http://') or url_or_id.startswith('https://'):
+            if not self.is_valid_wattpad_url(url_or_id):
+                logger.warning(f"[Security Warning] URL không thuộc domain Wattpad hợp lệ: {url_or_id}")
+                return None
             target_url = url_or_id
         else:
-            target_url = f"https://www.wattpad.com/story/{url_or_id}"
+            clean_id = re.sub(r'[^0-9]', '', url_or_id)
+            if not clean_id:
+                return None
+            target_url = f"https://www.wattpad.com/story/{clean_id}"
 
         try:
             resp = self.session.get(target_url, timeout=15)
@@ -212,3 +235,6 @@ class WattpadScraper:
         except Exception as e:
             logger.error(f"Fallback fetch failed for part {part_id}: {e}")
             return []
+
+# Module level helper for SSRF protection
+is_valid_wattpad_url = WattpadScraper.is_valid_wattpad_url
